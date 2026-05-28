@@ -7,8 +7,8 @@ function App() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>WMP Knowledge Portal</h1>
-        <p>Secure enterprise document ingestion & contextual intelligence for WMP LLC.</p>
+        <h1>Knowledge Portal</h1>
+        <p>Secure enterprise document ingestion & contextual intelligence.</p>
       </header>
       <div className="main-content">
         <FileUpload />

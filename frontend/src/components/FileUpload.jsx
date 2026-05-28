@@ -113,8 +113,8 @@ const FileUpload = () => {
 
   return (
     <div className="file-upload-container glass">
-      <h2>📚 WMP Document Hub</h2>
-      <p>Securely ingest team resources, project guidelines, and platform documentations for WMP LLC.</p>
+      <h2>📚 Document Hub</h2>
+      <p>Securely ingest team resources, project guidelines, and platform documentations.</p>
 
       {/* Drop Zone */}
       <div

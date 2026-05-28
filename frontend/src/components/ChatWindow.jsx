@@ -4,7 +4,7 @@ import './ChatWindow.css';
 
 const ChatWindow = () => {
   const [messages, setMessages] = useState([
-    { role: 'ai', content: 'Welcome to the WMP Knowledge Portal! I am your local AI assistant grounded securely in WMP LLC documentation. Upload your files to the left and ask me any questions.' }
+    { role: 'ai', content: 'Welcome to the Knowledge Portal! I am your local AI assistant grounded securely in your documentation. Upload your files to the left and ask me any questions.' }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);

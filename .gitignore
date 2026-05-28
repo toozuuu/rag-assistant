@@ -1,0 +1,22 @@
+# Dependency Directories
+node_modules/
+backend/target/
+frontend/dist/
+
+# Configuration and Sensitive Files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.idea/
+.vscode/
+
+# Local Database & User Content
+qdrant_data/
+uploads/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
