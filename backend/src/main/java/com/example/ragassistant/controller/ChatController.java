@@ -1,0 +1,25 @@
+package com.example.ragassistant.controller;
+
+import com.example.ragassistant.dto.ChatRequest;
+import com.example.ragassistant.dto.ChatResponse;
+import com.example.ragassistant.service.ChatService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/chat")
+@CrossOrigin(origins = "*") // Allows all origins for MVP simplicity
+public class ChatController {
+
+    private final ChatService chatService;
+
+    public ChatController(ChatService chatService) {
+        this.chatService = chatService;
+    }
+
+    @PostMapping("/ask")
+    public ResponseEntity<ChatResponse> ask(@RequestBody ChatRequest request) {
+        ChatResponse response = chatService.askQuestion(request.getQuestion());
+        return ResponseEntity.ok(response);
+    }
+}
