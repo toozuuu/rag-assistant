@@ -49,7 +49,7 @@ graph TD
     VectorDB -->|9. Returns top matches & image paths| AIService
     AIService -->|10. Feed query + context to local LLM| OllamaLLM
     OllamaLLM -->|11. Generate grounded answer| AIService
-    AIService -->|12. Return structured JSON (Answer + Images + Sources)| UI
+    AIService -->|12. Return structured JSON answer with sources and images| UI
 ```
 
 ---
