@@ -44,32 +44,19 @@ public class ChatService {
             );
         }
 
-        // 2. Extract image URLs from inline [image: ...] tags in the retrieved chunks
-        List<String> imageUrls = new ArrayList<>();
-        java.util.regex.Pattern imagePattern = java.util.regex.Pattern.compile("\\[image:\\s*([^\\]]+)\\]");
-        for (Document doc : similarDocuments) {
-            java.util.regex.Matcher matcher = imagePattern.matcher(doc.getContent());
-            while (matcher.find()) {
-                String ref = matcher.group(1).trim();
-                imageUrls.add(baseUrl + "/api/images/" + ref);
-            }
-        }
-        imageUrls = imageUrls.stream().distinct().collect(Collectors.toList());
-
-        // 3. Build context string for the LLM, stripping out the inline image tags
+        // 2. Build context string for the LLM, keeping the inline image tags
         String context = similarDocuments.stream()
                 .map(Document::getContent)
-                .map(content -> content.replaceAll("\\[image:\\s*([^\\]]+)\\]", ""))
                 .collect(Collectors.joining("\n\n---\n\n"));
 
-        // 4. Deduplicate sources by filename
+        // 3. Deduplicate sources by filename
         List<SourceReference> sources = similarDocuments.stream()
                 .map(doc -> String.valueOf(doc.getMetadata().getOrDefault("filename", "Unknown Document")))
                 .distinct()
                 .map(filename -> new SourceReference(filename, null))
                 .toList();
 
-        // 5. Strict anti-hallucination system prompt (works well with small models)
+        // 4. Strict anti-hallucination system prompt, instructing LLM to only include relevant images
         String systemPrompt = """
             INSTRUCTIONS (follow exactly):
             - You are a documentation assistant.
@@ -78,6 +65,8 @@ public class ChatService {
             - NEVER use your own knowledge. NEVER guess. NEVER suggest external websites or contacts.
             - Format answers clearly: use numbered steps, bullet points, and **bold** for key terms.
             - Be concise and accurate.
+            - If the CONTEXT contains an inline [image: ...] tag that is DIRECTLY relevant and illustrates the specific step or feature you are explaining, you MUST include that exact [image: ...] tag in your response at the end of the relevant sentence.
+            - DO NOT include any [image: ...] tags that are not directly relevant to the user's question.
 
             CONTEXT:
             {context}
@@ -88,11 +77,28 @@ public class ChatService {
         PromptTemplate promptTemplate = new PromptTemplate(systemPrompt);
         String systemMessage = promptTemplate.render(Map.of("context", context));
 
-        String aiResponse = chatClient.prompt()
+        String rawAiResponse = chatClient.prompt()
                 .system(systemMessage)
                 .user(question)
                 .call()
                 .content();
+
+        if (rawAiResponse == null) {
+            rawAiResponse = "I could not find this information in the documentation.";
+        }
+
+        // 5. Extract image URLs only from the LLM's generated response
+        List<String> imageUrls = new ArrayList<>();
+        java.util.regex.Pattern imagePattern = java.util.regex.Pattern.compile("\\[image:\\s*([^\\]]+)\\]");
+        java.util.regex.Matcher matcher = imagePattern.matcher(rawAiResponse);
+        while (matcher.find()) {
+            String ref = matcher.group(1).trim();
+            imageUrls.add(baseUrl + "/api/images/" + ref);
+        }
+        imageUrls = imageUrls.stream().distinct().collect(Collectors.toList());
+
+        // 6. Strip out the image tags from the final text response so the user gets clean text
+        String aiResponse = rawAiResponse.replaceAll("\\[image:\\s*([^\\]]+)\\]", "").trim();
 
         boolean isRefusal = checkRefusal(aiResponse);
 
