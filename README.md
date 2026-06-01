@@ -16,40 +16,48 @@ graph TD
     classDef backend fill:#1f2335,stroke:#9ece6a,stroke-width:2px,color:#9ece6a;
     classDef database fill:#1f2335,stroke:#e0af68,stroke-width:2px,color:#e0af68;
     classDef ollama fill:#1f2335,stroke:#f7768e,stroke-width:2px,color:#f7768e;
+    classDef cloud fill:#1f2335,stroke:#bb9af7,stroke-width:2px,color:#bb9af7;
 
     subgraph Client["Client Tier (React & Vite)"]
         UI["React Web App (Glassmorphism Layout)"]:::frontend
     end
 
     subgraph Server["Application Tier (Spring Boot 3)"]
+        SecurityFilter["Spring Security & JWT Filter"]:::backend
         Controller["Upload & Chat Controllers"]:::backend
         Extractor["Document Processing Suite <br/>(Apache Tika + PDFBox / POI)"]:::backend
         AIService["Spring AI Integration Layer"]:::backend
         ImgStore["Local Image Upload Store"]:::backend
     end
 
-    subgraph DataInf["Data & Inference Tier (100% Offline)"]
+    subgraph DataInf["Data & Inference Tier"]
         VectorDB[("Qdrant Vector Database")]:::database
-        OllamaLLM["Ollama Service <br/>(phi3:mini / nomic-embed)"]:::ollama
+        LocalInf["Local Inference <br/>(Ollama: phi3:mini / nomic-embed)"]:::ollama
+        CloudInf["Cloud/Hybrid Inference <br/>(OpenRouter / OpenAI Cloud APIs)"]:::cloud
     end
 
     %% Ingestion Flow
-    UI -->|1. Drag-and-Drop Documents| Controller
-    Controller -->|2. Ingest stream| Extractor
-    Extractor -->|3a. Extract plain text chunks| AIService
-    Extractor -->|3b. Carve embedded screenshots/images| ImgStore
-    AIService -->|4. Generate Vector Embeddings| OllamaLLM
-    AIService -->|5. Index text + payload metadata| VectorDB
+    UI -->|1. Drag-and-Drop Documents| SecurityFilter
+    SecurityFilter -->|2. Authorize Request| Controller
+    Controller -->|3. Ingest stream| Extractor
+    Controller -->|4a. Extract plain text chunks| AIService
+    Extractor -->|4b. Carve embedded screenshots/images| ImgStore
+    AIService -->|5. Generate Vector Embeddings| LocalInf
+    AIService -->|5. Generate Vector Embeddings| CloudInf
+    AIService -->|6. Index text + payload metadata| VectorDB
     ImgStore -.->|Link paths in payload| VectorDB
 
     %% RAG Query Flow
-    UI -->|6. Ask Natural Language Query| Controller
-    Controller -->|7. Forward prompt| AIService
-    AIService -->|8. Fetch relevant document chunks| VectorDB
-    VectorDB -->|9. Returns top matches & image paths| AIService
-    AIService -->|10. Feed query + context to local LLM| OllamaLLM
-    OllamaLLM -->|11. Generate grounded answer| AIService
-    AIService -->|12. Return structured JSON answer with sources and images| UI
+    UI -->|7. Ask Natural Language Query| SecurityFilter
+    SecurityFilter -->|8. Authorize Request| Controller
+    Controller -->|9. Forward prompt| AIService
+    AIService -->|10. Fetch relevant document chunks| VectorDB
+    VectorDB -->|11. Returns top matches & image paths| AIService
+    AIService -->|12. Feed query + context to LLM| LocalInf
+    AIService -->|12. Feed query + context to LLM| CloudInf
+    LocalInf -->|13. Generate grounded answer| AIService
+    CloudInf -->|13. Generate grounded answer| AIService
+    AIService -->|14. Return structured JSON answer with sources and images| UI
 ```
 
 ---
