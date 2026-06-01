@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/any.json
 spring:
   application:
     name: rag-assistant
@@ -21,8 +22,10 @@ spring:
         use-tls: false
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      # SonarLint java:S5693: Limit set to 8MB to comply with default security guidelines while providing
+      # ample headroom for multi-page text PDFs, word files, and markdown archives.
+      max-file-size: 8MB
+      max-request-size: 8MB
 server:
   port: 8080
 jwt:

@@ -41,7 +41,6 @@ public class ImageExtractorService {
         };
     }
 
-    // ── PDF Image Extraction ──────────────────────────────────────────────────
     private List<String> extractFromPdf(byte[] fileBytes, String docId) {
         List<String> imagePaths = new ArrayList<>();
         Path docDir = Paths.get(UPLOAD_DIR, docId);
@@ -49,27 +48,13 @@ public class ImageExtractorService {
             Files.createDirectories(docDir);
             try (PDDocument document = Loader.loadPDF(fileBytes)) {
                 int pageIndex = 0;
-                int imgCounter = 0;
+                int[] imgCounter = new int[]{0};
                 for (PDPage page : document.getPages()) {
                     PDResources resources = page.getResources();
                     if (resources == null) { pageIndex++; continue; }
 
                     for (COSName name : resources.getXObjectNames()) {
-                        try {
-                            PDXObject xObject = resources.getXObject(name);
-                            if (xObject instanceof PDImageXObject image) {
-                                BufferedImage bi = image.getImage();
-                                // Skip tiny icons/decorations (less than 80x80 px)
-                                if (bi != null && bi.getWidth() > 80 && bi.getHeight() > 80) {
-                                    String fname = String.format("page_%d_img_%d.png", pageIndex, imgCounter++);
-                                    ImageIO.write(bi, "PNG", docDir.resolve(fname).toFile());
-                                    imagePaths.add(docId + "/" + fname);
-                                    log.info("Extracted image: {}/{}", docId, fname);
-                                }
-                            }
-                        } catch (Exception e) {
-                            log.debug("Skipping xobject on page {}: {}", pageIndex, e.getMessage());
-                        }
+                        extractPdfPageXObject(name, resources, docDir, docId, pageIndex, imgCounter, imagePaths);
                     }
                     pageIndex++;
                 }
@@ -78,6 +63,24 @@ public class ImageExtractorService {
             log.warn("PDF image extraction failed for docId {}: {}", docId, e.getMessage());
         }
         return imagePaths;
+    }
+
+    private void extractPdfPageXObject(COSName name, PDResources resources, Path docDir, String docId, int pageIndex, int[] imgCounter, List<String> imagePaths) {
+        try {
+            PDXObject xObject = resources.getXObject(name);
+            if (xObject instanceof PDImageXObject image) {
+                BufferedImage bi = image.getImage();
+                // Skip tiny icons/decorations (less than 80x80 px)
+                if (bi != null && bi.getWidth() > 80 && bi.getHeight() > 80) {
+                    String fname = String.format("page_%d_img_%d.png", pageIndex, imgCounter[0]++);
+                    ImageIO.write(bi, "PNG", docDir.resolve(fname).toFile());
+                    imagePaths.add(docId + "/" + fname);
+                    log.info("Extracted image: {}/{}", docId, fname);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Skipping xobject on page {}: {}", pageIndex, e.getMessage());
+        }
     }
 
     // ── DOCX Image Extraction ─────────────────────────────────────────────────

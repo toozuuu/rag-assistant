@@ -14,11 +14,12 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 public class ChatService {
+
+    private static final String NOT_FOUND_MESSAGE = "I could not find this information in the documentation.";
 
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
@@ -32,44 +33,54 @@ public class ChatService {
     }
 
     public ChatResponse askQuestion(String question, String workspace) {
-        // 1. Retrieve top-4 most relevant child chunks, only above similarity threshold & matched workspace
-        List<Document> similarDocuments = vectorStore.similaritySearch(
-                SearchRequest.query(question)
-                        .withTopK(4)
-                        .withSimilarityThreshold(0.4)   // reject chunks that aren't relevant enough
-                        .withFilterExpression("workspace == '" + workspace + "'")
-        );
-
+        // 1. Retrieve top-4 most relevant child chunks above threshold
+        List<Document> similarDocuments = searchSimilarDocuments(question, workspace);
         if (similarDocuments.isEmpty()) {
             return new ChatResponse(
-                "I could not find this information in the documentation.",
+                NOT_FOUND_MESSAGE,
                 List.of(), List.of(), true,
                 "Retrieval step returned zero documents exceeding the similarity threshold of 0.4.",
                 0.0
             );
         }
 
-        // 2. Extract parent text contexts and build structured citation resources
-        StringBuilder contextBuilder = new StringBuilder();
+        // 2. Extract parent text contexts & build structured citation resources
         List<SourceReference> sources = new ArrayList<>();
+        String context = buildContextString(similarDocuments, sources);
+
+        // 3. Corrective RAG: Self-Correction Relevance Grader
+        boolean isRelevant = evaluateContextRelevance(question, context);
+        if (!isRelevant) {
+            return new ChatResponse(
+                NOT_FOUND_MESSAGE,
+                List.of(), List.of(), true,
+                "Retrieval Relevance Grader evaluated context chunks as not containing relevant facts to answer: '" + question + "'",
+                0.0
+            );
+        }
+
+        // 4. Generate structured answer with anti-hallucination prompt
+        String rawAiResponse = callLlmWithContext(question, context);
+        return parseLlmResponse(rawAiResponse, sources);
+    }
+
+    private List<Document> searchSimilarDocuments(String question, String workspace) {
+        return vectorStore.similaritySearch(
+                SearchRequest.query(question)
+                        .withTopK(4)
+                        .withSimilarityThreshold(0.4)
+                        .withFilterExpression("workspace == '" + workspace + "'")
+        );
+    }
+
+    private String buildContextString(List<Document> similarDocuments, List<SourceReference> sources) {
+        StringBuilder contextBuilder = new StringBuilder();
         for (int i = 0; i < similarDocuments.size(); i++) {
             Document doc = similarDocuments.get(i);
             String filename = String.valueOf(doc.getMetadata().getOrDefault("filename", "Unknown Document"));
             String parentText = String.valueOf(doc.getMetadata().getOrDefault("parent_text", doc.getContent()));
-            
-            Object pageNumObj = doc.getMetadata().get("page_number");
-            Integer pageNumber = null;
-            if (pageNumObj instanceof Number number) {
-                pageNumber = number.intValue();
-            } else if (pageNumObj != null) {
-                try {
-                    pageNumber = Integer.parseInt(pageNumObj.toString());
-                } catch (NumberFormatException e) {
-                    // Ignore
-                }
-            }
+            Integer pageNumber = extractPageNumber(doc.getMetadata().get("page_number"));
 
-            // Append to context list
             contextBuilder.append("- Context [cit:").append(i).append("]:\n");
             contextBuilder.append("  File: ").append(filename);
             if (pageNumber != null) {
@@ -78,12 +89,25 @@ public class ChatService {
             contextBuilder.append("\n");
             contextBuilder.append("  Text: ").append(parentText).append("\n\n");
 
-            // Build source reference
             sources.add(new SourceReference(filename, null, doc.getContent(), pageNumber));
         }
-        String context = contextBuilder.toString();
+        return contextBuilder.toString();
+    }
 
-        // 4. Corrective RAG: Self-Correction Relevance Grader
+    private Integer extractPageNumber(Object pageNumObj) {
+        if (pageNumObj instanceof Number number) {
+            return number.intValue();
+        } else if (pageNumObj != null) {
+            try {
+                return Integer.parseInt(pageNumObj.toString());
+            } catch (NumberFormatException e) {
+                // Ignore
+            }
+        }
+        return null;
+    }
+
+    private boolean evaluateContextRelevance(String question, String context) {
         String gradingSystemPrompt = """
             You are a strict data grader. Evaluate if the CONTEXT provided below is relevant and contains any useful details to help answer the user's question: "{question}".
             Respond with EXACTLY one word: "YES" or "NO". Do not write any other words, details, or markdown formatting.
@@ -103,17 +127,10 @@ public class ChatService {
         
         boolean isRelevant = gradingResult != null && gradingResult.trim().toUpperCase().contains("YES");
         log.info("Retrieval Grader evaluated document context relevance as: {} (Raw LLM output: {})", isRelevant, gradingResult);
+        return isRelevant;
+    }
 
-        if (!isRelevant) {
-            return new ChatResponse(
-                "I could not find this information in the documentation.",
-                List.of(), List.of(), true,
-                "Retrieval Relevance Grader evaluated the matched context chunks as not containing relevant facts to answer the question: '" + question + "'",
-                0.0
-            );
-        }
-
-        // 5. Strict anti-hallucination system prompt, instructing LLM to respond in structured JSON format
+    private String callLlmWithContext(String question, String context) {
         String systemPrompt = """
             INSTRUCTIONS (follow exactly):
             - You are a documentation assistant.
@@ -146,10 +163,12 @@ public class ChatService {
                 .content();
 
         if (rawAiResponse == null) {
-            rawAiResponse = "{\"reasoning\":\"No response from model\",\"answer\":\"I could not find this information in the documentation.\",\"confidenceScore\":0.0}";
+            rawAiResponse = "{\"reasoning\":\"No response from model\",\"answer\":\"" + NOT_FOUND_MESSAGE + "\",\"confidenceScore\":0.0}";
         }
+        return rawAiResponse;
+    }
 
-        // Clean up markdown wrapping if present
+    private ChatResponse parseLlmResponse(String rawAiResponse, List<SourceReference> sources) {
         String jsonText = rawAiResponse.trim();
         if (jsonText.startsWith("```")) {
             jsonText = jsonText.replaceAll("^```[a-zA-Z]*\\s*", "");
@@ -158,7 +177,7 @@ public class ChatService {
         }
 
         String reasoning = "Evaluation of grounding files.";
-        String answer = "I could not find this information in the documentation.";
+        String answer = NOT_FOUND_MESSAGE;
         double confidenceScore = 0.0;
         boolean isRefusal = false;
 
@@ -167,7 +186,7 @@ public class ChatService {
             com.fasterxml.jackson.databind.JsonNode rootNode = mapper.readTree(jsonText);
             
             reasoning = rootNode.path("reasoning").asText("Evaluated query context.");
-            answer = rootNode.path("answer").asText("I could not find this information in the documentation.");
+            answer = rootNode.path("answer").asText(NOT_FOUND_MESSAGE);
             confidenceScore = rootNode.path("confidenceScore").asDouble(0.0);
             
             if (answer.toLowerCase().contains("could not find") || confidenceScore < 0.3) {
@@ -183,18 +202,7 @@ public class ChatService {
             }
         }
 
-        // 6. Extract image URLs only from the clean answer
-        List<String> imageUrls = new ArrayList<>();
-        java.util.regex.Pattern imagePattern = java.util.regex.Pattern.compile("\\[image:\\s*([^\\]]+)\\]");
-        java.util.regex.Matcher matcher = imagePattern.matcher(answer);
-        String cleanedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        while (matcher.find()) {
-            String ref = matcher.group(1).trim();
-            imageUrls.add(cleanedBaseUrl + "/api/images/" + ref);
-        }
-        imageUrls = imageUrls.stream().distinct().collect(Collectors.toList());
-
-        // 7. Strip out the image tags from the final text response so the user gets clean text
+        List<String> imageUrls = extractImageUrls(answer);
         String finalAnswer = answer.replaceAll("\\[image:\\s*([^\\]]+)\\]", "").trim();
 
         if (checkRefusal(finalAnswer)) {
@@ -209,6 +217,18 @@ public class ChatService {
                 reasoning,
                 confidenceScore
         );
+    }
+
+    private List<String> extractImageUrls(String answer) {
+        List<String> imageUrls = new ArrayList<>();
+        java.util.regex.Pattern imagePattern = java.util.regex.Pattern.compile("\\[image:\\s*([^\\]]+)\\]");
+        java.util.regex.Matcher matcher = imagePattern.matcher(answer);
+        String cleanedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        while (matcher.find()) {
+            String ref = matcher.group(1).trim();
+            imageUrls.add(cleanedBaseUrl + "/api/images/" + ref);
+        }
+        return imageUrls.stream().distinct().toList();
     }
 
     private boolean checkRefusal(String response) {
