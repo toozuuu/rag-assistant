@@ -1,18 +1,6 @@
 spring:
   application:
     name: rag-assistant
-  datasource:
-    url: jdbc:h2:mem:ragdb
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: password
-  jpa:
-    hibernate:
-      ddl-auto: update
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
   ai:
     openai:
       chat:
@@ -38,5 +26,5 @@ spring:
 server:
   port: 8080
 jwt:
-  secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+  secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
   expiration: 86400000

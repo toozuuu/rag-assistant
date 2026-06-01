@@ -30,8 +30,11 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/**").permitAll() // Allowed for MVP simplicity and easy testing
-                .anyRequest().permitAll()
+                .requestMatchers("/api/images/**").permitAll()
+                .requestMatchers("/api/chat/**").authenticated()
+                .requestMatchers("/api/documents/**").authenticated()
+                .requestMatchers("/api/writer/**").authenticated()
+                .anyRequest().authenticated()
             )
             .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

@@ -7,10 +7,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class SourceReference {
-    private String document;
-    private String section;
-    private String snippet;
-    private Integer pageNumber;
+public class WriterRequest {
+    private String prompt;
+    private String workspace;
 }
-

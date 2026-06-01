@@ -70,10 +70,16 @@ Every element in this architecture is selected to deliver maximum privacy, light
 
 ## 🌟 Key Features
 
-* **Visual RAG Pipeline**: Ingests PDFs and DOCXs, automatically carves out embedded screenshots, and showcases them in a gorgeous lightbox gallery directly below corresponding AI answers.
-* **Strict Anti-Hallucination Guard**: Configured with a rigorous `0.4` cosine similarity threshold and detailed system prompts, ensuring the model immediately refuses to answer if the ground-truth context is missing from your files.
-* **Persistent Knowledge Base**: Full drag-and-drop support for multi-document ingestion with real-time indexing status trackers and persistent memory.
-* **Premium UX/UI**: Designed using a gorgeous dark glassmorphism layout, featuring rich micro-animations, a clean responsive sidebar, and custom ReactMarkdown rendering.
+* **Grounded Inline Citations (Next-Gen Transparency)**: Replaces "black-box" responses. AI answers are annotated with inline citation markers like `[1]` matching dotted underlines. Hovering displays a glassmorphic tooltip containing the exact document source, page number, and original grounding context snippet.
+* **Generative Document Writer & Exporter**: Features a dedicated, in-context technical drafting editor. Offers quick-pick templates (SLA Agreement, Tech Spec, Project Roadmap, Privacy Policy) and outputs beautifully styled drafts. Exporters run 100% offline via client-side Blob downloads and custom serif Print-to-PDF framers.
+* **High-Fidelity Motion Animations (`motion.dev`)**: Fluid, physics-based transitions driven by Framer Motion. Features glide-sliding active mode pills with spring physics, enter/exit sliding list elements inside the files hub, staggered mounting chat bubbles, and rotating smooth grounding accordion logs.
+* **Perfect Viewport Height Lock & Layout Integrity**: Restricts workspace height dynamically to ensure a zero-scrollbar desktop-grade experience. Features stacked two-row file cards to eliminate text clipping or metadata badge overlaps, and isolates scrolling strictly to the ingested file lists.
+* **Token-Refresh Auto-Retry Resiliency**: An automatic interceptor that catches any `401 Unauthorized` or `403 Forbidden` API responses, silently fetches a fresh signed JWT session from the backend, and transparently retries the failed API call. Also features proactive token validation on mount to guarantee a zero-interruption browser refresh experience.
+* **Isolated Multi-Workspaces (Qdrant Vector Pools)**: Segregates documents securely. Integrates Spring AI's `.withFilterExpression("workspace == ...")` payload queries in Qdrant, enabling isolated workspace swaps with instant context transitions.
+* **Visual RAG Pipeline**: Ingests PDFs and DOCXs, automatically carves out embedded illustrations and screenshots, and showcases them in a lightbox gallery inside AI answers.
+* **Self-Correction Relevance Grader (Corrective RAG)**: Features a strict anti-hallucination guard that runs a rapid corrective grading step, gracefully refusing to answer if matching ground-truth is missing.
+* **Mobile-First Responsive UX**: Employs a tailored, modern Outfit + Inter design system. Adapts cleanly across screens: full rows on Web, sliding drawer workspaces on Tablets, and touch bottom navigation bars on Mobile.
+* **Search Engine Optimized (SEO)**: Built with search-crawling directives, robot indexes, structured title tags, semantic markup, and descriptive meta keywords.
 
 ---
 
@@ -102,19 +108,30 @@ docker-compose up --build
 
 ---
 
+## 🔒 Security & Authentication Architecture
+
+This project is built with a production-ready **Zero-Trust Security Design**:
+* **JSON Web Tokens (JWT)**: Secure endpoint boundaries are enforced for chat (`/api/chat/**`), ingestion (`/api/documents/**`), and writer (`/api/writer/**`).
+* **Sleek Client Auth Layer**: Establishes silent background session validation when the app mounts, saving JWTs in `localStorage` and injecting standard `Authorization: Bearer <token>` headers into every call.
+* **Cross-Platform Path Traversal Protection**: Implements robust directory anchoring and path normalization checks in Spring Boot controllers to ensure malicious players cannot retrieve system-level files using relative backslash attacks.
+* **Production Reverse Proxying**: Routes React assets and API endpoints seamlessly through Nginx, bypassing raw browser CORS locks on public environments.
+
+---
+
 ## 📁 Repository Structure
 
 ```text
 rag-assistant/
 ├── backend/            # Spring Boot 3 Java Service
-│   ├── src/            # Document parsing, image extraction, and Spring AI logic
-│   └── pom.xml         # Maven dependencies
+│   ├── src/            # Parsing, chunking, security, and Spring AI logic
+│   ├── pom.xml         # Maven dependencies (Optimized: No H2 dependency)
+│   └── .env.example    # Backend environment template
 ├── frontend/           # React 18 + Vite Web Application
-│   ├── src/            # App layout, ChatWindow, and FileUpload components
+│   ├── src/            # Login, ChatWindow, and FileHub components
+│   ├── nginx.conf      # SPA routing & API reverse proxy configuration
 │   └── package.json    # Node scripts and dependencies
-├── uploads/            # Volumed local image store (gitignored)
+├── uploads/            # Local carved image volumes (gitignored)
 ├── qdrant_data/        # Persistent database storage (gitignored)
+├── .env.example        # Root environment variable templates
 └── docker-compose.yml  # Docker multi-container orchestrator
 ```
-
-# rag-assistant

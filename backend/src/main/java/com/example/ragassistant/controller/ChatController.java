@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/chat")
-@CrossOrigin(origins = "*") // Allows all origins for MVP simplicity
 public class ChatController {
 
     private final ChatService chatService;
@@ -19,7 +18,8 @@ public class ChatController {
 
     @PostMapping("/ask")
     public ResponseEntity<ChatResponse> ask(@RequestBody ChatRequest request) {
-        ChatResponse response = chatService.askQuestion(request.getQuestion());
+        String workspace = request.getWorkspace() != null ? request.getWorkspace() : "default";
+        ChatResponse response = chatService.askQuestion(request.getQuestion(), workspace);
         return ResponseEntity.ok(response);
     }
 }

@@ -14,4 +14,6 @@ public class ChatResponse {
     private List<SourceReference> sources;
     private List<String> imageUrls;
     private boolean refusal;
+    private String reasoning;
+    private double confidenceScore;
 }

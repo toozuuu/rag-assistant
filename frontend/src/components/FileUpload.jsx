@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import './FileUpload.css';
 
-const STORAGE_KEY = 'rag_indexed_files';
-
 const FileIcon = ({ name }) => {
-  const ext = name.split('.').pop().toLowerCase();
-  const icons = { pdf: '📄', docx: '📝', txt: '📃', html: '🌐', md: '📋' };
-  return <span className="file-icon">{icons[ext] || '📁'}</span>;
+  const ext = name.split('.').pop().toUpperCase();
+  return <span className="file-type-label">{ext}</span>;
 };
 
 const StatusBadge = ({ status }) => {
@@ -26,30 +24,23 @@ const formatSize = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const FileUpload = () => {
+const FileUpload = ({ token, workspace, onAuthError }) => {
   // Each entry: { name, size, status, file? }
   // 'file' is only present for newly added (not yet persisted) entries
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
 
-  // ── Load persisted indexed files on mount ──────────────────────────
+  const workspaceStorageKey = `rag_indexed_files_${workspace || 'default'}`;
+  // ── Load persisted indexed files when workspace changes ──────────────
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      const saved = JSON.parse(localStorage.getItem(workspaceStorageKey) || '[]');
       // Saved entries have no File object, only metadata
       setFiles(saved.map(f => ({ ...f, file: null })));
     } catch {
-      // ignore corrupt storage
+      setFiles([]);
     }
-  }, []);
-
-  // ── Persist indexed files whenever the list changes ────────────────
-  useEffect(() => {
-    const toSave = files
-      .filter(f => f.status === 'success')
-      .map(({ name, size, status }) => ({ name, size, status }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-  }, [files]);
+  }, [workspace, workspaceStorageKey]);
 
   // ── Add new files (skip duplicates already in the list) ───────────
   const addFiles = (newFiles) => {
@@ -62,7 +53,12 @@ const FileUpload = () => {
     ]);
   };
 
-  const handleFileChange = (e) => addFiles(e.target.files);
+  const handleFileChange = (e) => {
+    if (e.target.files) {
+      addFiles(e.target.files);
+    }
+    e.target.value = '';
+  };
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -70,12 +66,20 @@ const FileUpload = () => {
     addFiles(e.dataTransfer.files);
   };
 
-  const removeFile = (name) =>
-    setFiles(prev => prev.filter(f => f.name !== name));
+  const removeFile = (name) => {
+    setFiles(prev => {
+      const updated = prev.filter(f => f.name !== name);
+      const toSave = updated
+        .filter(f => f.status === 'success')
+        .map(({ name, size, status }) => ({ name, size, status }));
+      localStorage.setItem(workspaceStorageKey, JSON.stringify(toSave));
+      return updated;
+    });
+  };
 
   const clearAll = () => {
     setFiles([]);
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(workspaceStorageKey);
   };
 
   // ── Upload a single file entry ─────────────────────────────────────
@@ -88,20 +92,64 @@ const FileUpload = () => {
 
     const formData = new FormData();
     formData.append('file', item.file);
+    formData.append('workspace', workspace || 'default');
 
     try {
-      const res = await fetch('http://localhost:8080/api/documents/upload', {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
+      let currentToken = token;
+      let res = await fetch(`${apiBase}/api/documents/upload`, {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${currentToken}`
+        },
         body: formData,
       });
+
+      if (res.status === 401 || res.status === 403) {
+        if (onAuthError) {
+          const newToken = await onAuthError();
+          if (newToken) {
+            currentToken = newToken;
+            res = await fetch(`${apiBase}/api/documents/upload`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${currentToken}`
+              },
+              body: formData,
+            });
+          }
+        }
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        setFiles(prev => prev.map(f =>
+          f.name === item.name ? { ...f, status: 'error' } : f
+        ));
+        return;
+      }
+
       const status = res.ok ? 'success' : 'error';
-      setFiles(prev => prev.map(f =>
-        f.name === item.name ? { ...f, status } : f
-      ));
+      setFiles(prev => {
+        const updated = prev.map(f =>
+          f.name === item.name ? { ...f, status } : f
+        );
+        const toSave = updated
+          .filter(f => f.status === 'success')
+          .map(({ name, size, status }) => ({ name, size, status }));
+        localStorage.setItem(workspaceStorageKey, JSON.stringify(toSave));
+        return updated;
+      });
     } catch {
-      setFiles(prev => prev.map(f =>
-        f.name === item.name ? { ...f, status: 'error' } : f
-      ));
+      setFiles(prev => {
+        const updated = prev.map(f =>
+          f.name === item.name ? { ...f, status: 'error' } : f
+        );
+        const toSave = updated
+          .filter(f => f.status === 'success')
+          .map(({ name, size, status }) => ({ name, size, status }));
+        localStorage.setItem(workspaceStorageKey, JSON.stringify(toSave));
+        return updated;
+      });
     }
   };
 
@@ -113,7 +161,7 @@ const FileUpload = () => {
 
   return (
     <div className="file-upload-container glass">
-      <h2>📚 Document Hub</h2>
+      <h2>Document Hub</h2>
       <p>Securely ingest team resources, project guidelines, and platform documentations.</p>
 
       {/* Drop Zone */}
@@ -124,7 +172,7 @@ const FileUpload = () => {
         onDrop={handleDrop}
         onClick={() => document.getElementById('multi-file-input').click()}
       >
-        <div className="drop-icon">☁️</div>
+        <div className="drop-icon">↑</div>
         <p className="drop-text">
           Drag &amp; drop files here<br />
           <span>or click to browse</span>
@@ -152,23 +200,37 @@ const FileUpload = () => {
           </div>
 
           <ul>
-            {files.map(({ name, size, status }) => (
-              <li key={name} className={`file-item ${status}`}>
-                <FileIcon name={name} />
-                <div className="file-info">
-                  <span className="file-name" title={name}>{name}</span>
-                  <span className="file-size">{formatSize(size)}</span>
-                </div>
-                <StatusBadge status={status} />
-                {status !== 'uploading' && (
-                  <button
-                    className="remove-btn"
-                    onClick={() => removeFile(name)}
-                    title="Remove"
-                  >✕</button>
-                )}
-              </li>
-            ))}
+            <AnimatePresence initial={false}>
+              {files.map(({ name, size, status }) => (
+                <motion.li
+                  key={name}
+                  className={`file-item ${status}`}
+                  initial={{ opacity: 0, height: 0, x: -15 }}
+                  animate={{ opacity: 1, height: 'auto', x: 0 }}
+                  exit={{ opacity: 0, height: 0, x: 15 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <FileIcon name={name} />
+                  <div className="file-info">
+                    <div className="file-name-row">
+                      <span className="file-name" title={name}>{name}</span>
+                    </div>
+                    <div className="file-meta-row">
+                      <span className="file-size">{formatSize(size)}</span>
+                      <StatusBadge status={status} />
+                    </div>
+                  </div>
+                  {status !== 'uploading' && (
+                    <button
+                      className="remove-btn"
+                      onClick={() => removeFile(name)}
+                      title="Remove"
+                    >✕</button>
+                  )}
+                </motion.li>
+              ))}
+            </AnimatePresence>
           </ul>
         </div>
       )}

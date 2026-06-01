@@ -24,7 +24,7 @@ public class DocumentService {
     private final VectorStore vectorStore;
     private final ImageExtractorService imageExtractorService;
 
-    public void processAndStoreDocument(MultipartFile file) throws IOException {
+    public void processAndStoreDocument(MultipartFile file, String workspace) throws IOException {
         byte[] fileBytes = file.getBytes();
         String originalFilename = file.getOriginalFilename();
 
@@ -52,49 +52,67 @@ public class DocumentService {
             fullText = documents.isEmpty() ? "" : documents.get(0).getContent();
         }
 
-        // 3. Semantic chunking (500 tokens, 100 overlap) and Metadata enrichment
-        TokenTextSplitter textSplitter = new TokenTextSplitter(500, 100, 5, 10000, true);
+        // 3. Semantic Hierarchical Chunking (Parent: 1000 tokens / 200 overlap, Child: 150 tokens / 30 overlap)
+        TokenTextSplitter parentSplitter = new TokenTextSplitter(1000, 200, 5, 10000, true);
+        TokenTextSplitter childSplitter = new TokenTextSplitter(150, 30, 5, 10000, true);
         List<Document> splitDocuments = new ArrayList<>();
 
         if (lowerFilename.endsWith(".pdf") && fullText != null && !fullText.isEmpty()) {
-            // PDF: Page-by-page chunking & page-level image association
+            // PDF: Page-by-page Parent-Child chunking
             String[] pages = fullText.split("\\f|\\u000c");
             for (int p = 0; p < pages.length; p++) {
                 String pageText = pages[p];
                 if (pageText.trim().isEmpty()) continue;
 
-                // Find images extracted from this specific page (0-indexed)
+                // Find images extracted from this specific page
                 final int pageIdx = p;
                 List<String> pageImages = imageRefs.stream()
                         .filter(ref -> ref.contains("/page_" + pageIdx + "_img_"))
                         .toList();
 
                 Document pageDoc = new Document(pageText);
-                List<Document> pageChunks = textSplitter.apply(List.of(pageDoc));
+                List<Document> parentChunks = parentSplitter.apply(List.of(pageDoc));
 
-                for (Document chunk : pageChunks) {
-                    // Append page-level image tags to the chunk content so they stay close to the text
-                    StringBuilder chunkContent = new StringBuilder(chunk.getContent());
+                for (Document parentChunk : parentChunks) {
+                    // Enrich parent text with image tags
+                    StringBuilder parentContent = new StringBuilder(parentChunk.getContent());
                     for (String imgRef : pageImages) {
-                        chunkContent.append("\n[image: ").append(imgRef).append("]\n");
+                        parentContent.append("\n[image: ").append(imgRef).append("]\n");
                     }
+                    String parentTextEnriched = parentContent.toString();
 
-                    Document enrichedChunk = new Document(chunkContent.toString(), chunk.getMetadata());
-                    enrichedChunk.getMetadata().put("filename", originalFilename);
-                    enrichedChunk.getMetadata().put("doc_id", docId);
-                    enrichedChunk.getMetadata().put("page_number", pageIdx + 1);
-                    splitDocuments.add(enrichedChunk);
+                    // Split the parent chunk into small child chunks
+                    Document enrichedParentDoc = new Document(parentTextEnriched);
+                    List<Document> childChunks = childSplitter.apply(List.of(enrichedParentDoc));
+
+                    for (Document childChunk : childChunks) {
+                        Document enrichedChild = new Document(childChunk.getContent(), childChunk.getMetadata());
+                        enrichedChild.getMetadata().put("filename", originalFilename);
+                        enrichedChild.getMetadata().put("doc_id", docId);
+                        enrichedChild.getMetadata().put("page_number", pageIdx + 1);
+                        enrichedChild.getMetadata().put("parent_text", parentTextEnriched);
+                        enrichedChild.getMetadata().put("workspace", workspace);
+                        splitDocuments.add(enrichedChild);
+                    }
                 }
             }
         } else {
-            // DOCX / HTML / TXT: Chunk the text (which already has embedded image tags for DOCX)
+            // DOCX / HTML / TXT: General Parent-Child chunking
             Document doc = new Document(fullText);
-            List<Document> rawChunks = textSplitter.apply(List.of(doc));
+            List<Document> parentChunks = parentSplitter.apply(List.of(doc));
 
-            for (Document chunk : rawChunks) {
-                chunk.getMetadata().put("filename", originalFilename);
-                chunk.getMetadata().put("doc_id", docId);
-                splitDocuments.add(chunk);
+            for (Document parentChunk : parentChunks) {
+                String parentText = parentChunk.getContent();
+                List<Document> childChunks = childSplitter.apply(List.of(parentChunk));
+
+                for (Document childChunk : childChunks) {
+                    Document enrichedChild = new Document(childChunk.getContent(), childChunk.getMetadata());
+                    enrichedChild.getMetadata().put("filename", originalFilename);
+                    enrichedChild.getMetadata().put("doc_id", docId);
+                    enrichedChild.getMetadata().put("parent_text", parentText);
+                    enrichedChild.getMetadata().put("workspace", workspace);
+                    splitDocuments.add(enrichedChild);
+                }
             }
         }
 
