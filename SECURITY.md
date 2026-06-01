@@ -11,7 +11,7 @@ Only the latest release of the RAG Assistant is actively supported with security
 | Version | Supported |
 | :--- | :--- |
 | **Latest (main branch)** |  Yes |
-| **All Older Versions** | ❌ No (Please upgrade) |
+| **All Older Versions** | No (Please upgrade) |
 
 ---
 

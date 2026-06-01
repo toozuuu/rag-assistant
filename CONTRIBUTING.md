@@ -6,12 +6,12 @@ Any contributions you make are **highly appreciated**. Please read the guideline
 
 ---
 
-## 🗺️ Code of Conduct
+## Code of Conduct
 This project and everyone participating in it is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the project maintainer.
 
 ---
 
-## 🛠️ How Can I Contribute?
+## How Can I Contribute?
 
 ### 1. Reporting Bugs
 * Check the [GitHub Issues](https://github.com/toozuuu/rag-assistant/issues) tab to ensure the bug hasn't already been reported.
@@ -36,7 +36,7 @@ This project and everyone participating in it is governed by the [Code of Conduc
 
 ---
 
-## 💻 Local Development Setup
+## Local Development Setup
 
 Refer to the main [README.md](README.md) for quick-start Docker instructions. For active development, it is highly recommended to run the services natively:
 
@@ -84,7 +84,7 @@ docker run -d -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage qdrant
 
 ---
 
-## 🎨 Development & Style Guidelines
+## Development & Style Guidelines
 
 ### Git Branching
 Always create a new branch for your work instead of committing directly to `main`:

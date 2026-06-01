@@ -1,10 +1,10 @@
-# 🚀 AI-Powered RAG Assistant with Screenshot Integration
+# AI-Powered RAG Assistant with Screenshot Integration
 
 A highly secure, offline-first, and **multimodal-ready RAG** (Retrieval-Augmented Generation) assistant. Engineered with **Spring Boot 3 (Spring AI)**, **React 18 (Vite)**, and a **Qdrant Vector Database**, it runs entirely locally using **Ollama**. The application stands out by extracting both plain text and embedded illustrations, screenshots, and diagrams from documents, letting the AI ground its responses with high fidelity and display visual evidence alongside answers.
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 This system is built as a three-tier local architecture. It processes, embeds, indexes, and queries documents completely within your machine's perimeter.
 
@@ -54,7 +54,7 @@ graph TD
 
 ---
 
-## 🛠️ Why This Technology Stack?
+## Why This Technology Stack?
 
 Every element in this architecture is selected to deliver maximum privacy, lightning-fast processing, and enterprise-grade extensibility on consumer-grade hardware.
 
@@ -68,7 +68,7 @@ Every element in this architecture is selected to deliver maximum privacy, light
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
 * **Grounded Inline Citations (Next-Gen Transparency)**: Replaces "black-box" responses. AI answers are annotated with inline citation markers like `[1]` matching dotted underlines. Hovering displays a glassmorphic tooltip containing the exact document source, page number, and original grounding context snippet.
 * **Generative Document Writer & Exporter**: Features a dedicated, in-context technical drafting editor. Offers quick-pick templates (SLA Agreement, Tech Spec, Project Roadmap, Privacy Policy) and outputs beautifully styled drafts. Exporters run 100% offline via client-side Blob downloads and custom serif Print-to-PDF framers.
@@ -83,7 +83,7 @@ Every element in this architecture is selected to deliver maximum privacy, light
 
 ---
 
-## 🚀 Setup & Execution
+## Setup & Execution
 
 ### 1. Download Local AI Models
 Open a terminal on your host machine and run the following commands to pull the necessary models via Ollama:
@@ -108,7 +108,7 @@ docker-compose up --build
 
 ---
 
-## 🔒 Security & Authentication Architecture
+## Security & Authentication Architecture
 
 This project is built with a production-ready **Zero-Trust Security Design**:
 * **JSON Web Tokens (JWT)**: Secure endpoint boundaries are enforced for chat (`/api/chat/**`), ingestion (`/api/documents/**`), and writer (`/api/writer/**`).
@@ -118,7 +118,7 @@ This project is built with a production-ready **Zero-Trust Security Design**:
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
 rag-assistant/
