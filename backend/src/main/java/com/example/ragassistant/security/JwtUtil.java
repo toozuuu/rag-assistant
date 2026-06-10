@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 @Component
@@ -18,8 +21,13 @@ public class JwtUtil {
     @Value("${jwt.secret}")
     private String secret;
 
-    @Value("${jwt.expiration}")
+    @Value("${jwt.expiration:86400000}")
     private long expiration;
+
+    @Value("${jwt.refresh-expiration:2592000000}")
+    private long refreshExpiration;
+
+    private final Map<String, String> refreshTokens = new ConcurrentHashMap<>();
 
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
@@ -52,8 +60,30 @@ public class JwtUtil {
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256).compact();
     }
 
+    public String generateRefreshToken(String username) {
+        String refreshToken = UUID.randomUUID().toString() + "-" + System.currentTimeMillis();
+        refreshTokens.put(refreshToken, username);
+        return refreshToken;
+    }
+
+    public String refreshAccessToken(String refreshToken) {
+        String username = refreshTokens.get(refreshToken);
+        if (username == null) {
+            return null;
+        }
+        return generateToken(username);
+    }
+
+    public void revokeRefreshToken(String refreshToken) {
+        refreshTokens.remove(refreshToken);
+    }
+
     public boolean validateToken(String token, String username) {
-        final String extractedUsername = extractUsername(token);
-        return (extractedUsername.equals(username) && !isTokenExpired(token));
+        try {
+            final String extractedUsername = extractUsername(token);
+            return (extractedUsername.equals(username) && !isTokenExpired(token));
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

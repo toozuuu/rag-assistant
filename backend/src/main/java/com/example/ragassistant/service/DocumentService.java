@@ -1,10 +1,12 @@
 package com.example.ragassistant.service;
 
+import com.example.ragassistant.config.ChunkingProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -37,6 +39,7 @@ public class DocumentService {
 
     private final VectorStore vectorStore;
     private final ImageExtractorService imageExtractorService;
+    private final ChunkingProperties chunkingProperties;
 
     @Value("${spring.ai.vectorstore.qdrant.host:localhost}")
     private String qdrantHost;
@@ -75,9 +78,14 @@ public class DocumentService {
             String lowerFilename = originalFilename.toLowerCase();
             String fullText = extractText(fileBytes, originalFilename, docId, lowerFilename);
 
+            if (fullText == null || fullText.isBlank()) {
+                log.warn("No extractable text in document: {}. Skipping chunking and storage.", originalFilename);
+                return;
+            }
+
             // 3. Chunking & Ingestion
             List<Document> splitDocuments;
-            if (ext.equals("pdf") && fullText != null && !fullText.isEmpty()) {
+            if (ext.equals("pdf")) {
                 splitDocuments = chunkAndEnrichPdf(fullText, originalFilename, docId, workspace, imageRefs);
             } else {
                 splitDocuments = chunkAndEnrichGeneral(fullText, originalFilename, docId, workspace);
@@ -120,18 +128,35 @@ public class DocumentService {
             return extractDocxWithImageTags(fileBytes, docId);
         }
         
-        ByteArrayResource resource = new ByteArrayResource(fileBytes) {
-            @Override
-            public String getFilename() { return originalFilename; }
-        };
-        TikaDocumentReader documentReader = new TikaDocumentReader(resource);
-        List<Document> documents = documentReader.get();
-        return documents.isEmpty() ? "" : documents.get(0).getContent();
+        try {
+            ByteArrayResource resource = new ByteArrayResource(fileBytes) {
+                @Override
+                public String getFilename() { return originalFilename; }
+            };
+            TikaDocumentReader documentReader = new TikaDocumentReader(resource);
+            List<Document> documents = documentReader.get();
+            if (!documents.isEmpty() && documents.get(0).getContent() != null) {
+                return documents.get(0).getContent();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to extract text from {}: {}", originalFilename, e.getMessage());
+        }
+        return "";
     }
 
     private List<Document> chunkAndEnrichPdf(String fullText, String originalFilename, String docId, String workspace, List<String> imageRefs) {
-        TokenTextSplitter parentSplitter = new TokenTextSplitter(1000, 200, 5, 10000, true);
-        TokenTextSplitter childSplitter = new TokenTextSplitter(150, 30, 5, 10000, true);
+        TokenTextSplitter parentSplitter = new TokenTextSplitter(
+                chunkingProperties.getParentMaxTokens(),
+                chunkingProperties.getParentOverlap(),
+                chunkingProperties.getMinChunkSize(),
+                chunkingProperties.getMaxChunks(),
+                true);
+        TokenTextSplitter childSplitter = new TokenTextSplitter(
+                chunkingProperties.getChildMaxTokens(),
+                chunkingProperties.getChildOverlap(),
+                chunkingProperties.getMinChunkSize(),
+                chunkingProperties.getMaxChunks(),
+                true);
         List<Document> splitDocuments = new ArrayList<>();
 
         // PDF: Page-by-page Parent-Child chunking using form feed character
@@ -173,8 +198,18 @@ public class DocumentService {
     }
 
     private List<Document> chunkAndEnrichGeneral(String fullText, String originalFilename, String docId, String workspace) {
-        TokenTextSplitter parentSplitter = new TokenTextSplitter(1000, 200, 5, 10000, true);
-        TokenTextSplitter childSplitter = new TokenTextSplitter(150, 30, 5, 10000, true);
+        TokenTextSplitter parentSplitter = new TokenTextSplitter(
+                chunkingProperties.getParentMaxTokens(),
+                chunkingProperties.getParentOverlap(),
+                chunkingProperties.getMinChunkSize(),
+                chunkingProperties.getMaxChunks(),
+                true);
+        TokenTextSplitter childSplitter = new TokenTextSplitter(
+                chunkingProperties.getChildMaxTokens(),
+                chunkingProperties.getChildOverlap(),
+                chunkingProperties.getMinChunkSize(),
+                chunkingProperties.getMaxChunks(),
+                true);
         List<Document> splitDocuments = new ArrayList<>();
 
         Document doc = new Document(fullText);

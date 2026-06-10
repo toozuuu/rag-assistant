@@ -8,12 +8,18 @@ services:
       - ./qdrant_data:/qdrant/storage
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   backend:
     build:
       context: ./backend
     ports:
-      - "8080:8080"
+      - "8081:8080"
     env_file:
       - ./backend/.env
     environment:
@@ -23,8 +29,16 @@ services:
       - APP_BASE_URL=http://localhost:8080
     volumes:
       - ./uploads:/app/uploads
+      - ./conversations:/app/conversations
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   frontend:
     build:
@@ -32,4 +46,5 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy

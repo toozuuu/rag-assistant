@@ -22,8 +22,6 @@ spring:
         use-tls: false
   servlet:
     multipart:
-      # SonarLint java:S5693: Limit set to 8MB to comply with default security guidelines while providing
-      # ample headroom for multi-page text PDFs, word files, and markdown archives.
       max-file-size: 8MB
       max-request-size: 8MB
 server:
@@ -31,3 +29,33 @@ server:
 jwt:
   secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
   expiration: 86400000
+  refresh-expiration: 2592000000
+qdrant:
+  rest-port: 6333
+
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}
+  chunking:
+    parent-max-tokens: 1000
+    parent-overlap: 200
+    child-max-tokens: 150
+    child-overlap: 30
+    min-chunk-size: 5
+    max-chunks: 10000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html

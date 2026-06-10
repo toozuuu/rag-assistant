@@ -1,0 +1,24 @@
+spring:
+  ai:
+    vectorstore:
+      qdrant:
+        host: localhost
+        port: 6334
+        collection-name: test-collection
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration
+      - org.springframework.ai.autoconfigure.qdrant.QdrantVectorStoreAutoConfiguration
+jwt:
+  secret: test-secret-key-which-is-at-least-256-bits-long-for-hs256-algorithm
+  expiration: 86400000
+  refresh-expiration: 2592000000
+qdrant:
+  rest-port: 6333
+app:
+  base-url: http://localhost:8080
+  chunking:
+    parent-max-tokens: 100
+    parent-overlap: 20
+    child-max-tokens: 50
+    child-overlap: 10

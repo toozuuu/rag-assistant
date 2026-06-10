@@ -28,7 +28,7 @@
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--drop-zone-bg);
 }
 
 .drop-zone:hover,
@@ -223,6 +223,30 @@
 .remove-btn:hover {
   background: rgba(239, 68, 68, 0.15);
   color: #f87171;
+}
+
+/* Progress Bar */
+.progress-bar-container {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 0.25rem;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-top: 0.25rem;
 }
 
 /* Upload Button */

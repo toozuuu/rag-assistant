@@ -85,6 +85,8 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
   const messagesEndRef = useRef(null);
 
   // ── Reset conversation thread whenever workspace switches ───────────
@@ -105,13 +107,29 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
     scrollToBottom();
   }, [messages]);
 
+  const saveConversation = async (msgs) => {
+    try {
+      const history = msgs
+        .filter(m => m.role !== 'ai' || (!m.isRefusal && m.content))
+        .slice(-20)
+        .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+      await fetch(getApiUrl('/api/conversations'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ conversationId, messages: history })
+      });
+    } catch {}
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    const userMessage = { role: 'user', content: input };
-    setMessages(prev => [...prev, userMessage]);
+    const userMessage = { role: 'user', content: input.trim() };
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput('');
     setLoading(true);
+    setStreaming(true);
 
     try {
       let currentToken = token;
@@ -120,6 +138,16 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
         .slice(-10)
         .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
       const body = JSON.stringify({ question: userMessage.content, workspace: workspace || 'default', history });
+
+      // Try SSE streaming first
+      let streamUsed = false;
+      if (!!window.EventSource) {
+        try {
+          const eventSource = new EventSource(getApiUrl('/api/chat/ask/stream'));
+          // SSE with POST is complex; fall back to regular fetch
+          eventSource.close();
+        } catch {}
+      }
 
       let response = await fetch(getApiUrl('/api/chat/ask'), {
         method: 'POST',
@@ -156,8 +184,7 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
       }
 
       const data = await response.json();
-
-      setMessages(prev => [...prev, {
+      const aiResponse = {
         role: 'ai',
         content: data.answer,
         sources: data.sources,
@@ -165,7 +192,11 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
         isRefusal: data.refusal,
         reasoning: data.reasoning,
         confidenceScore: data.confidenceScore
-      }]);
+      };
+
+      const finalMessages = [...updatedMessages, aiResponse];
+      setMessages(finalMessages);
+      saveConversation(finalMessages);
     } catch (error) {
       setMessages(prev => [...prev, {
         role: 'ai',
@@ -173,6 +204,7 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
       }]);
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
   };
 

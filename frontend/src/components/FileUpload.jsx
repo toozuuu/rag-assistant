@@ -180,11 +180,16 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     }
   };
 
-  const uploadAll = () =>
-    files.filter(f => f.status === 'pending' || f.status === 'error').forEach(uploadFile);
+  const uploadAll = async () => {
+    const toUpload = files.filter(f => f.status === 'pending' || f.status === 'error');
+    await Promise.all(toUpload.map(uploadFile));
+  };
 
   const pendingCount = files.filter(f => f.status === 'pending').length;
   const hasUploading  = files.some(f => f.status === 'uploading');
+  const totalFiles = files.filter(f => f.file).length;
+  const completedFiles = files.filter(f => f.file && (f.status === 'success' || f.status === 'error')).length;
+  const uploadProgress = totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : 0;
 
   return (
     <div className="file-upload-container glass">
@@ -260,6 +265,14 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
               ))}
             </AnimatePresence>
           </ul>
+        </div>
+      )}
+
+      {/* Upload Progress */}
+      {hasUploading && (
+        <div className="progress-bar-container">
+          <div className="progress-bar-fill" style={{ width: `${uploadProgress}%` }} />
+          <div className="progress-text">{completedFiles} / {totalFiles} files indexed</div>
         </div>
       )}
 

@@ -12,10 +12,12 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
 @Slf4j
@@ -75,6 +77,65 @@ public class ChatService {
             sb.append(entry.getRole()).append(": ").append(entry.getContent()).append("\n");
         }
         return sb.toString();
+    }
+
+    public void askQuestionStream(String question, String workspace, List<ChatHistoryEntry> history, SseEmitter emitter) {
+        try {
+            List<Document> similarDocuments = searchSimilarDocuments(question, workspace);
+            if (similarDocuments.isEmpty()) {
+                emitter.send(SseEmitter.event().name("error").data("No relevant documents found."));
+                emitter.complete();
+                return;
+            }
+
+            List<SourceReference> sources = new ArrayList<>();
+            String context = buildContextString(similarDocuments, sources);
+
+            boolean isRelevant = evaluateContextRelevance(question, context);
+            if (!isRelevant) {
+                emitter.send(SseEmitter.event().name("error").data("No relevant information found."));
+                emitter.complete();
+                return;
+            }
+
+            String historyStr = formatHistory(history);
+            String systemPrompt = """
+                INSTRUCTIONS (follow exactly):
+                - You are a documentation assistant.
+                - You ONLY answer using the CONTEXT LIST provided below.
+                - NEVER use your own knowledge. NEVER guess.
+                - Ground your answer completely.
+
+                CONVERSATION HISTORY:
+                %s
+
+                CONTEXT LIST:
+                %s
+                """;
+
+            String systemMessage = String.format(systemPrompt, historyStr, context);
+
+            chatClient.prompt()
+                    .system(systemMessage)
+                    .user(question)
+                    .stream()
+                    .content()
+                    .doOnComplete(emitter::complete)
+                    .doOnError(emitter::completeWithError)
+                    .subscribe(chunk -> {
+                        try {
+                            emitter.send(SseEmitter.event().name("token").data(chunk));
+                        } catch (IOException e) {
+                            emitter.completeWithError(e);
+                        }
+                    });
+
+        } catch (Exception e) {
+            try {
+                emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
+            } catch (IOException ignored) {}
+            emitter.completeWithError(e);
+        }
     }
 
     private List<Document> searchSimilarDocuments(String question, String workspace) {

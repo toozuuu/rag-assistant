@@ -12,6 +12,7 @@ function App() {
   const [username, setUsername] = useState(localStorage.getItem('username') || 'local-user');
   const [activeTab, setActiveTab] = useState('chat');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem('rag_theme') || 'dark');
   
   const [workspaces, setWorkspaces] = useState(() => {
     try {
@@ -33,15 +34,16 @@ function App() {
       const response = await fetch(getApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'local-user', password: '' })
+        body: JSON.stringify({ username: 'local-user', password: 'local123' })
       });
 
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem('token', data.token);
-        localStorage.setItem('username', 'local-user');
+        localStorage.setItem('refreshToken', data.refreshToken);
+        localStorage.setItem('username', data.username);
         setToken(data.token);
-        setUsername('local-user');
+        setUsername(data.username);
         return data.token;
       }
     } catch (err) {
@@ -53,6 +55,15 @@ function App() {
   useEffect(() => {
     fetchTokenSilently();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('rag_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
 
   const handleSelectWorkspace = (name) => {
     setCurrentWorkspace(name);
@@ -186,9 +197,18 @@ function App() {
             </button>
           </div>
 
-          <div className="user-badge glass" onClick={() => setSidebarOpen(true)}>
-            <span className="user-icon pulse-online"></span>
-            <span className="username">Pool: {currentWorkspace}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              className="theme-toggle-btn glass"
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            <div className="user-badge glass" onClick={() => setSidebarOpen(true)}>
+              <span className="user-icon pulse-online"></span>
+              <span className="username">Pool: {currentWorkspace}</span>
+            </div>
           </div>
         </header>
 

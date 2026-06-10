@@ -1,7 +1,6 @@
 package com.example.ragassistant.service;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -46,7 +45,7 @@ public class ImageExtractorService {
         Path docDir = Paths.get(UPLOAD_DIR, docId);
         try {
             Files.createDirectories(docDir);
-            try (PDDocument document = Loader.loadPDF(fileBytes)) {
+            try (PDDocument document = PDDocument.load(fileBytes)) {
                 int pageIndex = 0;
                 int[] imgCounter = new int[]{0};
                 for (PDPage page : document.getPages()) {

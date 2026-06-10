@@ -15,6 +15,7 @@ frontend/dist/
 # Local Database & User Content
 qdrant_data/
 uploads/
+conversations/
 
 # Operating System Files
 .DS_Store
