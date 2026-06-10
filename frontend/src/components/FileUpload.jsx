@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getApiUrl } from '../api';
 import './FileUpload.css';
 
 const FileIcon = ({ name }) => {
@@ -25,22 +26,47 @@ const formatSize = (bytes) => {
 };
 
 const FileUpload = ({ token, workspace, onAuthError }) => {
-  // Each entry: { name, size, status, file? }
-  // 'file' is only present for newly added (not yet persisted) entries
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
+  const [deleting, setDeleting] = useState(null);
 
   const workspaceStorageKey = `rag_indexed_files_${workspace || 'default'}`;
+
+  const fetchIndexedDocuments = async (currentToken) => {
+    try {
+      let res = await fetch(getApiUrl(`/api/documents?workspace=${encodeURIComponent(workspace || 'default')}`), {
+        headers: { 'Authorization': `Bearer ${currentToken || token}` }
+      });
+
+      if ((res.status === 401 || res.status === 403) && onAuthError) {
+        const newToken = await onAuthError();
+        if (newToken) {
+          res = await fetch(getApiUrl(`/api/documents?workspace=${encodeURIComponent(workspace || 'default')}`), {
+            headers: { 'Authorization': `Bearer ${newToken}` }
+          });
+        }
+      }
+
+      if (res.ok) {
+        const docs = await res.json();
+        const mapped = docs.map(d => ({ name: d.filename, docId: d.docId, status: 'success' }));
+        setFiles(prev => {
+          const existing = prev.filter(f => f.file);
+          const merged = [...existing, ...mapped];
+          const seen = new Set();
+          return merged.filter(f => { const key = f.name; if (seen.has(key)) return false; seen.add(key); return true; });
+        });
+      }
+    } catch {
+      // fallback to local storage
+    }
+  };
+
   // ── Load persisted indexed files when workspace changes ──────────────
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(workspaceStorageKey) || '[]');
-      // Saved entries have no File object, only metadata
-      setFiles(saved.map(f => ({ ...f, file: null })));
-    } catch {
-      setFiles([]);
-    }
-  }, [workspace, workspaceStorageKey]);
+    setFiles([]);
+    fetchIndexedDocuments();
+  }, [workspace]);
 
   // ── Add new files (skip duplicates already in the list) ───────────
   const addFiles = (newFiles) => {
@@ -66,20 +92,30 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     addFiles(e.dataTransfer.files);
   };
 
-  const removeFile = (name) => {
-    setFiles(prev => {
-      const updated = prev.filter(f => f.name !== name);
-      const toSave = updated
-        .filter(f => f.status === 'success')
-        .map(({ name, size, status }) => ({ name, size, status }));
-      localStorage.setItem(workspaceStorageKey, JSON.stringify(toSave));
-      return updated;
-    });
+  const removeFile = async (name) => {
+    const file = files.find(f => f.name === name);
+    if (file?.docId) {
+      setDeleting(name);
+      try {
+        const res = await fetch(getApiUrl(`/api/documents/${encodeURIComponent(file.docId)}?workspace=${encodeURIComponent(workspace || 'default')}`), {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          console.error('Failed to delete document from backend');
+        }
+      } catch (e) {
+        console.error('Error deleting document:', e);
+      } finally {
+        setDeleting(null);
+      }
+    }
+    setFiles(prev => prev.filter(f => f.name !== name));
   };
 
   const clearAll = () => {
+    if (!window.confirm('Remove all files from the list? This will also remove them from the vector database.')) return;
     setFiles([]);
-    localStorage.removeItem(workspaceStorageKey);
   };
 
   // ── Upload a single file entry ─────────────────────────────────────
@@ -95,9 +131,8 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     formData.append('workspace', workspace || 'default');
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
       let currentToken = token;
-      let res = await fetch(`${apiBase}/api/documents/upload`, {
+      let res = await fetch(getApiUrl('/api/documents/upload'), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentToken}`
@@ -110,7 +145,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
           const newToken = await onAuthError();
           if (newToken) {
             currentToken = newToken;
-            res = await fetch(`${apiBase}/api/documents/upload`, {
+            res = await fetch(getApiUrl('/api/documents/upload'), {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${currentToken}`
@@ -128,28 +163,20 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
         return;
       }
 
-      const status = res.ok ? 'success' : 'error';
-      setFiles(prev => {
-        const updated = prev.map(f =>
-          f.name === item.name ? { ...f, status } : f
-        );
-        const toSave = updated
-          .filter(f => f.status === 'success')
-          .map(({ name, size, status }) => ({ name, size, status }));
-        localStorage.setItem(workspaceStorageKey, JSON.stringify(toSave));
-        return updated;
-      });
-    } catch {
-      setFiles(prev => {
-        const updated = prev.map(f =>
+      if (res.ok) {
+        setFiles(prev => prev.map(f =>
+          f.name === item.name ? { ...f, status: 'success' } : f
+        ));
+        fetchIndexedDocuments(currentToken);
+      } else {
+        setFiles(prev => prev.map(f =>
           f.name === item.name ? { ...f, status: 'error' } : f
-        );
-        const toSave = updated
-          .filter(f => f.status === 'success')
-          .map(({ name, size, status }) => ({ name, size, status }));
-        localStorage.setItem(workspaceStorageKey, JSON.stringify(toSave));
-        return updated;
-      });
+        ));
+      }
+    } catch {
+      setFiles(prev => prev.map(f =>
+        f.name === item.name ? { ...f, status: 'error' } : f
+      ));
     }
   };
 
@@ -226,7 +253,8 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
                       className="remove-btn"
                       onClick={() => removeFile(name)}
                       title="Remove"
-                    >✕</button>
+                      disabled={deleting === name}
+                    >{deleting === name ? '...' : '✕'}</button>
                   )}
                 </motion.li>
               ))}

@@ -6,48 +6,113 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.apache.poi.xwpf.usermodel.*;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class DocumentService {
 
+    private static final long MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("pdf", "txt", "docx", "html", "md");
+
     private final VectorStore vectorStore;
     private final ImageExtractorService imageExtractorService;
+
+    @Value("${spring.ai.vectorstore.qdrant.host:localhost}")
+    private String qdrantHost;
+
+    @Value("${qdrant.rest-port:6333}")
+    private int qdrantRestPort;
+
+    @Value("${spring.ai.vectorstore.qdrant.collection-name:rag-docs}")
+    private String collectionName;
 
     public void processAndStoreDocument(MultipartFile file, String workspace) throws IOException {
         byte[] fileBytes = file.getBytes();
         String originalFilename = file.getOriginalFilename();
+
+        if (originalFilename == null || originalFilename.isBlank()) {
+            throw new IllegalArgumentException("Filename must not be empty");
+        }
+
+        String ext = getExtension(originalFilename);
+        if (!ALLOWED_EXTENSIONS.contains(ext)) {
+            throw new IllegalArgumentException("Unsupported file type: ." + ext + ". Allowed: " + ALLOWED_EXTENSIONS);
+        }
+
+        if (fileBytes.length > MAX_FILE_SIZE) {
+            throw new IllegalArgumentException("File size exceeds maximum allowed limit of 8MB");
+        }
+
         String docId = generateDocId(originalFilename);
 
         // 1. Extract embedded images
         List<String> imageRefs = imageExtractorService.extractImages(fileBytes, originalFilename, docId);
         log.info("Extracted {} image(s) from document: {}", imageRefs.size(), originalFilename);
 
-        // 2. Extract text
-        String lowerFilename = originalFilename != null ? originalFilename.toLowerCase() : "";
-        String fullText = extractText(fileBytes, originalFilename, docId, lowerFilename);
+        try {
+            // 2. Extract text
+            String lowerFilename = originalFilename.toLowerCase();
+            String fullText = extractText(fileBytes, originalFilename, docId, lowerFilename);
 
-        // 3. Chunking & Ingestion
-        List<Document> splitDocuments;
-        if (lowerFilename.endsWith(".pdf") && fullText != null && !fullText.isEmpty()) {
-            splitDocuments = chunkAndEnrichPdf(fullText, originalFilename, docId, workspace, imageRefs);
-        } else {
-            splitDocuments = chunkAndEnrichGeneral(fullText, originalFilename, docId, workspace);
+            // 3. Chunking & Ingestion
+            List<Document> splitDocuments;
+            if (ext.equals("pdf") && fullText != null && !fullText.isEmpty()) {
+                splitDocuments = chunkAndEnrichPdf(fullText, originalFilename, docId, workspace, imageRefs);
+            } else {
+                splitDocuments = chunkAndEnrichGeneral(fullText, originalFilename, docId, workspace);
+            }
+
+            // 4. Store in Qdrant
+            vectorStore.accept(splitDocuments);
+            log.info("Stored {} chunks for document: {}", splitDocuments.size(), originalFilename);
+        } catch (Exception e) {
+            cleanupExtractedImages(docId);
+            log.warn("Cleaned up extracted images for docId {} due to processing failure", docId);
+            throw e;
         }
+    }
 
-        // 4. Store in Qdrant
-        vectorStore.accept(splitDocuments);
-        log.info("Stored {} chunks for document: {}", splitDocuments.size(), originalFilename);
+    private String getExtension(String filename) {
+        int dotIdx = filename.lastIndexOf('.');
+        if (dotIdx < 0) return "";
+        return filename.substring(dotIdx + 1).toLowerCase();
+    }
+
+    private void cleanupExtractedImages(String docId) {
+        try {
+            Path docDir = Paths.get(ImageExtractorService.UPLOAD_DIR, docId);
+            if (Files.exists(docDir)) {
+                try (var files = Files.list(docDir)) {
+                    files.forEach(file -> {
+                        try { Files.deleteIfExists(file); } catch (IOException ignored) {}
+                    });
+                }
+                Files.deleteIfExists(docDir);
+            }
+        } catch (IOException e) {
+            log.warn("Failed to clean up images for docId {}: {}", docId, e.getMessage());
+        }
     }
 
     private String extractText(byte[] fileBytes, String originalFilename, String docId, String lowerFilename) throws IOException {
@@ -177,6 +242,61 @@ public class DocumentService {
                 sb.append("\n[image: ").append(docId).append("/").append(fname).append("]\n");
             }
         }
+    }
+
+    public List<Map<String, String>> listDocuments(String workspace) {
+        String safeWorkspace = workspace != null ? workspace.replace("'", "\\'") : "default";
+        List<Document> docs = vectorStore.similaritySearch(
+                SearchRequest.query("document")
+                        .withTopK(100)
+                        .withSimilarityThreshold(0.0)
+                        .withFilterExpression("workspace == '" + safeWorkspace + "'")
+        );
+
+        Map<String, Map<String, String>> uniqueDocs = new HashMap<>();
+        for (Document doc : docs) {
+            String docId = String.valueOf(doc.getMetadata().getOrDefault("doc_id", ""));
+            String filename = String.valueOf(doc.getMetadata().getOrDefault("filename", "Unknown"));
+            if (!docId.isEmpty() && !uniqueDocs.containsKey(docId)) {
+                Map<String, String> entry = new HashMap<>();
+                entry.put("docId", docId);
+                entry.put("filename", filename);
+                uniqueDocs.put(docId, entry);
+            }
+        }
+        return new ArrayList<>(uniqueDocs.values());
+    }
+
+    public void deleteDocument(String docId, String workspace) {
+        String safeWorkspace = workspace != null ? workspace.replace("'", "\\'") : "default";
+        String safeDocId = docId != null ? docId.replace("'", "\\'") : "";
+
+        // Use Qdrant REST API to delete points by filter
+        try {
+            RestTemplate rt = new RestTemplate();
+            String url = String.format("http://%s:%d/collections/%s/points/delete",
+                    qdrantHost, qdrantRestPort, collectionName);
+
+            String requestBody = String.format("""
+                    {
+                      "filter": {
+                        "must": [
+                          {"key": "workspace", "match": {"value": "%s"}},
+                          {"key": "doc_id", "match": {"value": "%s"}}
+                        ]
+                      }
+                    }
+                    """, safeWorkspace, safeDocId);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<String> request = new HttpEntity<>(requestBody, headers);
+            rt.postForEntity(url, request, String.class);
+        } catch (Exception e) {
+            log.warn("Failed to delete document '{}' from Qdrant: {}", docId, e.getMessage());
+        }
+
+        cleanupExtractedImages(docId);
     }
 
     private String generateDocId(String filename) {

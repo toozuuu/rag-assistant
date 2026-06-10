@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ChatWindow from './components/ChatWindow';
 import FileUpload from './components/FileUpload';
 import DocumentWriter from './components/DocumentWriter';
+import { getApiUrl } from './api';
 import './index.css';
 
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,8 +30,7 @@ function App() {
 
   const fetchTokenSilently = async () => {
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
-      const response = await fetch(`${apiBase}/api/auth/login`, {
+      const response = await fetch(getApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'local-user', password: '' })
@@ -64,6 +64,15 @@ function App() {
     e.preventDefault();
     const cleanName = newWorkspaceName.trim();
     if (!cleanName || workspaces.includes(cleanName)) return;
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(cleanName)) {
+      alert('Workspace name can only contain letters, numbers, hyphens, and underscores.');
+      return;
+    }
+    if (cleanName.length > 50) {
+      alert('Workspace name must be 50 characters or fewer.');
+      return;
+    }
 
     const updated = [...workspaces, cleanName];
     setWorkspaces(updated);

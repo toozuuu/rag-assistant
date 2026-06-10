@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
+import { getApiUrl } from '../api';
 import './DocumentWriter.css';
 
 const DocumentWriter = ({ token, workspace, onAuthError }) => {
@@ -10,6 +11,7 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
   const [loading, setLoading] = useState(false);
   const [editorMode, setEditorMode] = useState('split'); // 'split' | 'edit' | 'preview'
   const [copied, setCopied] = useState(false);
+  const objectUrlRef = useRef(null);
 
   // Load template helper
   const handleSelectTemplate = (templateName) => {
@@ -37,9 +39,8 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
     setReasoning('');
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
       let currentToken = token;
-      let response = await fetch(`${apiBase}/api/writer/generate`, {
+      let response = await fetch(getApiUrl('/api/writer/generate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -53,7 +54,7 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
           const newToken = await onAuthError();
           if (newToken) {
             currentToken = newToken;
-            response = await fetch(`${apiBase}/api/writer/generate`, {
+            response = await fetch(getApiUrl('/api/writer/generate'), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -81,6 +82,14 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
     }
   };
 
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+      }
+    };
+  }, []);
+
   const handleCopy = () => {
     if (!draft) return;
     navigator.clipboard.writeText(draft);
@@ -90,8 +99,12 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
 
   const handleDownload = () => {
     if (!draft) return;
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+    }
     const blob = new Blob([draft], { type: 'text/markdown;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
+    objectUrlRef.current = url;
     const link = document.createElement('a');
     link.href = url;
     link.setAttribute('download', `${workspace || 'workspace'}_document_${Date.now()}.md`);

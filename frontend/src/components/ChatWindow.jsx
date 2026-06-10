@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
+import { getApiUrl } from '../api';
 import './ChatWindow.css';
 
 // Preprocessor to replace [cit:X] syntax with markdown links [[cit-X]](#cit-X)
@@ -113,15 +114,20 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
     setLoading(true);
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
       let currentToken = token;
-      let response = await fetch(`${apiBase}/api/chat/ask`, {
+      const history = messages
+        .filter(m => m.role !== 'ai' || (!m.isRefusal && m.content))
+        .slice(-10)
+        .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+      const body = JSON.stringify({ question: userMessage.content, workspace: workspace || 'default', history });
+
+      let response = await fetch(getApiUrl('/api/chat/ask'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${currentToken}`
         },
-        body: JSON.stringify({ question: userMessage.content, workspace: workspace || 'default' })
+        body
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -129,13 +135,13 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
           const newToken = await onAuthError();
           if (newToken) {
             currentToken = newToken;
-            response = await fetch(`${apiBase}/api/chat/ask`, {
+            response = await fetch(getApiUrl('/api/chat/ask'), {
               method: 'POST',
               headers: { 
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${currentToken}`
               },
-              body: JSON.stringify({ question: userMessage.content, workspace: workspace || 'default' })
+              body
             });
           }
         }

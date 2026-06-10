@@ -1,5 +1,6 @@
 package com.example.ragassistant.service;
 
+import com.example.ragassistant.dto.ChatHistoryEntry;
 import com.example.ragassistant.dto.ChatResponse;
 import com.example.ragassistant.dto.SourceReference;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 @Slf4j
@@ -23,16 +25,18 @@ public class ChatService {
 
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.base-url:http://localhost:8080}")
     private String baseUrl;
 
-    public ChatService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore) {
+    public ChatService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore, ObjectMapper objectMapper) {
         this.chatClient = chatClientBuilder.build();
         this.vectorStore = vectorStore;
+        this.objectMapper = objectMapper;
     }
 
-    public ChatResponse askQuestion(String question, String workspace) {
+    public ChatResponse askQuestion(String question, String workspace, List<ChatHistoryEntry> history) {
         // 1. Retrieve top-4 most relevant child chunks above threshold
         List<Document> similarDocuments = searchSimilarDocuments(question, workspace);
         if (similarDocuments.isEmpty()) {
@@ -60,17 +64,32 @@ public class ChatService {
         }
 
         // 4. Generate structured answer with anti-hallucination prompt
-        String rawAiResponse = callLlmWithContext(question, context);
+        String rawAiResponse = callLlmWithContext(question, context, history);
         return parseLlmResponse(rawAiResponse, sources);
     }
 
+    private String formatHistory(List<ChatHistoryEntry> history) {
+        if (history == null || history.isEmpty()) return "No prior conversation.";
+        StringBuilder sb = new StringBuilder();
+        for (ChatHistoryEntry entry : history) {
+            sb.append(entry.getRole()).append(": ").append(entry.getContent()).append("\n");
+        }
+        return sb.toString();
+    }
+
     private List<Document> searchSimilarDocuments(String question, String workspace) {
+        String safeWorkspace = sanitizeFilterValue(workspace);
         return vectorStore.similaritySearch(
                 SearchRequest.query(question)
                         .withTopK(4)
                         .withSimilarityThreshold(0.4)
-                        .withFilterExpression("workspace == '" + workspace + "'")
+                        .withFilterExpression("workspace == '" + safeWorkspace + "'")
         );
+    }
+
+    private String sanitizeFilterValue(String value) {
+        if (value == null) return "default";
+        return value.replace("'", "\\'");
     }
 
     private String buildContextString(List<Document> similarDocuments, List<SourceReference> sources) {
@@ -130,7 +149,8 @@ public class ChatService {
         return isRelevant;
     }
 
-    private String callLlmWithContext(String question, String context) {
+    private String callLlmWithContext(String question, String context, List<ChatHistoryEntry> history) {
+        String historyStr = formatHistory(history);
         String systemPrompt = """
             INSTRUCTIONS (follow exactly):
             - You are a documentation assistant.
@@ -149,12 +169,15 @@ public class ChatService {
             - If the CONTEXT contains an inline [image: ...] tag that is DIRECTLY relevant and illustrates the specific step or feature you are explaining, you MUST include that exact [image: ...] tag in the "answer" field at the end of the relevant sentence.
             - DO NOT include any [image: ...] tags that are not directly relevant.
             
+            CONVERSATION HISTORY:
+            {history}
+            
             CONTEXT LIST:
             {context}
             """;
 
         PromptTemplate promptTemplate = new PromptTemplate(systemPrompt);
-        String systemMessage = promptTemplate.render(Map.of("context", context));
+        String systemMessage = promptTemplate.render(Map.of("context", context, "history", historyStr));
 
         String rawAiResponse = chatClient.prompt()
                 .system(systemMessage)
@@ -182,8 +205,7 @@ public class ChatService {
         boolean isRefusal = false;
 
         try {
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.JsonNode rootNode = mapper.readTree(jsonText);
+            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(jsonText);
             
             reasoning = rootNode.path("reasoning").asText("Evaluated query context.");
             answer = rootNode.path("answer").asText(NOT_FOUND_MESSAGE);
