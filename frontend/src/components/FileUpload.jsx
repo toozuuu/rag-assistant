@@ -8,7 +8,7 @@ const FileIcon = ({ name }) => {
   return <span className="file-type-label">{ext}</span>;
 };
 
-const StatusBadge = ({ status }) => {
+const StatusBadge = ({ status, error }) => {
   const map = {
     pending:   { label: 'Ready',      cls: 'badge-pending' },
     uploading: { label: 'Indexing...', cls: 'badge-uploading' },
@@ -16,6 +16,16 @@ const StatusBadge = ({ status }) => {
     error:     { label: '✗ Failed',    cls: 'badge-error' },
   };
   const { label, cls } = map[status] || map.pending;
+  
+  // Show error tooltip on hover for error status
+  if (status === 'error' && error) {
+    return (
+      <span className={`status-badge ${cls}`} title={error}>
+        {label}
+      </span>
+    );
+  }
+  
   return <span className={`status-badge ${cls}`}>{label}</span>;
 };
 
@@ -75,7 +85,13 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     );
     setFiles(prev => [
       ...prev,
-      ...toAdd.map(f => ({ file: f, name: f.name, size: f.size, status: 'pending' })),
+      ...toAdd.map(f => ({ 
+        file: f, 
+        name: f.name, 
+        size: f.size, 
+        status: 'pending',
+        error: null // Initialize error as null
+      })),
     ]);
   };
 
@@ -123,7 +139,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     if (!item.file) return; // persisted entries have no File object
 
     setFiles(prev => prev.map(f =>
-      f.name === item.name ? { ...f, status: 'uploading' } : f
+      f.name === item.name ? { ...f, status: 'uploading', error: null } : f
     ));
 
     const formData = new FormData();
@@ -156,26 +172,65 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
         }
       }
 
+      // Handle specific HTTP status codes with meaningful messages
+      if (res.status === 400) {
+        const errorData = await res.json();
+        const errorMsg = errorData.error || 'Bad request - invalid file or parameters';
+        setFiles(prev => prev.map(f =>
+          f.name === item.name ? { ...f, status: 'error', error: errorMsg } : f
+        ));
+        return;
+      }
+      
+      if (res.status === 413) {
+        setFiles(prev => prev.map(f =>
+          f.name === item.name ? { ...f, status: 'error', error: 'File too large (max 8MB)' } : f
+        ));
+        return;
+      }
+      
+      if (res.status === 415) {
+        setFiles(prev => prev.map(f =>
+          f.name === item.name ? { ...f, status: 'error', error: 'Unsupported file type' } : f
+        ));
+        return;
+      }
+
       if (res.status === 401 || res.status === 403) {
         setFiles(prev => prev.map(f =>
-          f.name === item.name ? { ...f, status: 'error' } : f
+          f.name === item.name ? { ...f, status: 'error', error: 'Authentication failed' } : f
         ));
         return;
       }
 
       if (res.ok) {
         setFiles(prev => prev.map(f =>
-          f.name === item.name ? { ...f, status: 'success' } : f
+          f.name === item.name ? { ...f, status: 'success', error: null } : f
         ));
         fetchIndexedDocuments(currentToken);
       } else {
+        // Handle other error statuses
+        let errorMsg = 'Upload failed';
+        try {
+          const errorData = await res.json();
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          // If we can't parse JSON, use the status text
+          errorMsg = `Server error (${res.status})`;
+        }
         setFiles(prev => prev.map(f =>
-          f.name === item.name ? { ...f, status: 'error' } : f
+          f.name === item.name ? { ...f, status: 'error', error: errorMsg } : f
         ));
       }
-    } catch {
+    } catch (error) {
+      // Network or other unexpected errors
+      console.error('Upload error:', error);
       setFiles(prev => prev.map(f =>
-        f.name === item.name ? { ...f, status: 'error' } : f
+        f.name === item.name ? { 
+          ...f, 
+          status: 'error', 
+          error: error.message || 'Network error - check connection' 
+        } : f
       ));
     }
   };
@@ -233,7 +288,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
 
           <ul>
             <AnimatePresence initial={false}>
-              {files.map(({ name, size, status }) => (
+              {files.map(({ name, size, status, error }) => (
                 <motion.li
                   key={name}
                   className={`file-item ${status}`}
@@ -250,7 +305,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
                     </div>
                     <div className="file-meta-row">
                       <span className="file-size">{formatSize(size)}</span>
-                      <StatusBadge status={status} />
+                      <StatusBadge status={status} error={error} />
                     </div>
                   </div>
                   {status !== 'uploading' && (
@@ -260,6 +315,13 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
                       title="Remove"
                       disabled={deleting === name}
                     >{deleting === name ? '...' : '✕'}</button>
+                  )}
+                  
+                  {/* Show error details below the file item if there's an error */}
+                  {status === 'error' && error && (
+                    <div className="error-details">
+                      <small className="error-text">⚠️ {error}</small>
+                    </div>
                   )}
                 </motion.li>
               ))}

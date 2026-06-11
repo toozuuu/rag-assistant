@@ -68,6 +68,7 @@ public class DocumentService {
         }
 
         String docId = generateDocId(originalFilename);
+        log.info("Processing document: {} (workspace: {}, size: {} bytes)", originalFilename, workspace, fileBytes.length);
 
         // 1. Extract embedded images
         List<String> imageRefs = imageExtractorService.extractImages(fileBytes, originalFilename, docId);
@@ -79,9 +80,12 @@ public class DocumentService {
             String fullText = extractText(fileBytes, originalFilename, docId, lowerFilename);
 
             if (fullText == null || fullText.isBlank()) {
-                log.warn("No extractable text in document: {}. Skipping chunking and storage.", originalFilename);
+                log.warn("No extractable text in document: {} (size: {} bytes). Skipping chunking and storage.", 
+                        originalFilename, fileBytes.length);
                 return;
             }
+
+            log.debug("Extracted text length: {} characters for document: {}", fullText.length(), originalFilename);
 
             // 3. Chunking & Ingestion
             List<Document> splitDocuments;
@@ -91,10 +95,15 @@ public class DocumentService {
                 splitDocuments = chunkAndEnrichGeneral(fullText, originalFilename, docId, workspace);
             }
 
+            log.debug("Created {} chunks for document: {}", splitDocuments.size(), originalFilename);
+
             // 4. Store in Qdrant
             vectorStore.accept(splitDocuments);
-            log.info("Stored {} chunks for document: {}", splitDocuments.size(), originalFilename);
+            log.info("Stored {} chunks for document: {} (workspace: {})", 
+                    splitDocuments.size(), originalFilename, workspace);
         } catch (Exception e) {
+            log.error("Failed to process document: {} (workspace: {}) - {}", 
+                    originalFilename, workspace, e.getMessage(), e);
             cleanupExtractedImages(docId);
             log.warn("Cleaned up extracted images for docId {} due to processing failure", docId);
             throw e;
@@ -139,7 +148,8 @@ public class DocumentService {
                 return documents.get(0).getContent();
             }
         } catch (Exception e) {
-            log.warn("Failed to extract text from {}: {}", originalFilename, e.getMessage());
+            log.warn("Failed to extract text from {} (size: {} bytes): {}", 
+                    originalFilename, fileBytes.length, e.getMessage());
         }
         return "";
     }
