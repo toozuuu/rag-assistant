@@ -1,6 +1,7 @@
 package com.example.ragassistant.config;
 
 import com.example.ragassistant.security.JwtAuthFilter;
+import com.example.ragassistant.security.RateLimitingFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -21,14 +22,21 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitingFilter rateLimitingFilter;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, RateLimitingFilter rateLimitingFilter) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.rateLimitingFilter = rateLimitingFilter;
     }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public RateLimitingFilter rateLimitingFilter() {
+        return new RateLimitingFilter();
     }
 
     @Bean
@@ -47,6 +55,7 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -56,10 +65,10 @@ public class SecurityConfig {
     public UrlBasedCorsConfigurationSource corsConfigurationSource() {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);
-        config.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+        config.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowedMethods(List.of("*"));
+        config.setAllowCredentials(false);
         source.registerCorsConfiguration("/**", config);
         return source;
     }

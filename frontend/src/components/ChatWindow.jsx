@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 import { getApiUrl } from '../api';
@@ -85,12 +85,13 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const [conversationId, setConversationId] = useState(null);
+  const [conversationId] = useState(null);
   const messagesEndRef = useRef(null);
 
   // ── Reset conversation thread whenever workspace switches ───────────
   useEffect(() => {
+    // Intentional: Reset messages when workspace changes
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([
       {
         role: 'ai',
@@ -118,7 +119,9 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ conversationId, messages: history })
       });
-    } catch {}
+    } catch {
+      // Ignore conversation save errors
+    }
   };
 
   const handleSend = async () => {
@@ -129,7 +132,6 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
     setMessages(updatedMessages);
     setInput('');
     setLoading(true);
-    setStreaming(true);
 
     try {
       let currentToken = token;
@@ -140,13 +142,14 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
       const body = JSON.stringify({ question: userMessage.content, workspace: workspace || 'default', history });
 
       // Try SSE streaming first
-      let streamUsed = false;
-      if (!!window.EventSource) {
+      if (window.EventSource) {
         try {
           const eventSource = new EventSource(getApiUrl('/api/chat/ask/stream'));
           // SSE with POST is complex; fall back to regular fetch
           eventSource.close();
-        } catch {}
+        } catch {
+          // Ignore SSE connection errors
+        }
       }
 
       let response = await fetch(getApiUrl('/api/chat/ask'), {
@@ -197,14 +200,13 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
       const finalMessages = [...updatedMessages, aiResponse];
       setMessages(finalMessages);
       saveConversation(finalMessages);
-    } catch (error) {
+    } catch {
       setMessages(prev => [...prev, {
         role: 'ai',
         content: 'Sorry, I encountered an error connecting to the server.'
       }]);
     } finally {
       setLoading(false);
-      setStreaming(false);
     }
   };
 

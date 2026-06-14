@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getApiUrl } from '../api';
 import './FileUpload.css';
@@ -40,9 +40,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
   const [dragging, setDragging] = useState(false);
   const [deleting, setDeleting] = useState(null);
 
-  const workspaceStorageKey = `rag_indexed_files_${workspace || 'default'}`;
-
-  const fetchIndexedDocuments = async (currentToken) => {
+  const fetchIndexedDocuments = useCallback(async (currentToken) => {
     try {
       let res = await fetch(getApiUrl(`/api/documents?workspace=${encodeURIComponent(workspace || 'default')}`), {
         headers: { 'Authorization': `Bearer ${currentToken || token}` }
@@ -70,13 +68,13 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     } catch {
       // fallback to local storage
     }
-  };
+  }, [workspace, token, onAuthError]);
 
   // ── Load persisted indexed files when workspace changes ──────────────
   useEffect(() => {
     setFiles([]);
     fetchIndexedDocuments();
-  }, [workspace]);
+  }, [workspace, fetchIndexedDocuments]);
 
   // ── Add new files (skip duplicates already in the list) ───────────
   const addFiles = (newFiles) => {
@@ -214,7 +212,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
         try {
           const errorData = await res.json();
           errorMsg = errorData.error || errorMsg;
-        } catch (e) {
+        } catch {
           // If we can't parse JSON, use the status text
           errorMsg = `Server error (${res.status})`;
         }

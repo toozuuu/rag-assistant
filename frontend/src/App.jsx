@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import ChatWindow from './components/ChatWindow';
 import FileUpload from './components/FileUpload';
 import DocumentWriter from './components/DocumentWriter';
@@ -9,7 +9,6 @@ import { motion, AnimatePresence } from 'motion/react';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '');
-  const [username, setUsername] = useState(localStorage.getItem('username') || 'local-user');
   const [activeTab, setActiveTab] = useState('chat');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('rag_theme') || 'dark');
@@ -31,10 +30,12 @@ function App() {
 
   const fetchTokenSilently = async () => {
     try {
+      const silentUser = import.meta.env.VITE_SILENT_AUTH_USER || 'local-user';
+      const silentPass = import.meta.env.VITE_SILENT_AUTH_PASS || 'local123';
       const response = await fetch(getApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'local-user', password: 'local123' })
+        body: JSON.stringify({ username: silentUser, password: silentPass })
       });
 
       if (response.ok) {
@@ -43,7 +44,6 @@ function App() {
         localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('username', data.username);
         setToken(data.token);
-        setUsername(data.username);
         return data.token;
       }
     } catch (err) {
@@ -53,6 +53,8 @@ function App() {
   };
 
   useEffect(() => {
+    // Intentional: Initialize auth token on mount
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTokenSilently();
   }, []);
 

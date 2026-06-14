@@ -40,6 +40,7 @@ public class DocumentService {
     private final VectorStore vectorStore;
     private final ImageExtractorService imageExtractorService;
     private final ChunkingProperties chunkingProperties;
+    private final RestTemplate restTemplate;
 
     @Value("${spring.ai.vectorstore.qdrant.host:localhost}")
     private String qdrantHost;
@@ -318,7 +319,6 @@ public class DocumentService {
 
         // Use Qdrant REST API to delete points by filter
         try {
-            RestTemplate rt = new RestTemplate();
             String url = String.format("http://%s:%d/collections/%s/points/delete",
                     qdrantHost, qdrantRestPort, collectionName);
 
@@ -336,7 +336,7 @@ public class DocumentService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<String> request = new HttpEntity<>(requestBody, headers);
-            rt.postForEntity(url, request, String.class);
+            restTemplate.postForEntity(url, request, String.class);
         } catch (Exception e) {
             log.warn("Failed to delete document '{}' from Qdrant: {}", docId, e.getMessage());
         }

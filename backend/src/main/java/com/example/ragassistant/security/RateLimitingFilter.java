@@ -12,6 +12,9 @@ import org.springframework.http.HttpStatus;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class RateLimitingFilter implements Filter {
@@ -19,6 +22,17 @@ public class RateLimitingFilter implements Filter {
     private final Map<String, SlidingWindowCounter> counters = new ConcurrentHashMap<>();
     private static final int MAX_REQUESTS = 10;
     private static final long WINDOW_MS = 60_000;
+    private static final int MAX_COUNTERS = 10_000;
+    private static final long CLEANUP_INTERVAL_MS = 5 * 60_000;
+    private final ScheduledExecutorService cleanupExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "rate-limit-cleanup");
+        t.setDaemon(true);
+        return t;
+    });
+
+    public RateLimitingFilter() {
+        cleanupExecutor.scheduleAtFixedRate(this::cleanupStaleCounters, CLEANUP_INTERVAL_MS, CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
 
     @Override
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain)
@@ -28,7 +42,12 @@ public class RateLimitingFilter implements Filter {
         HttpServletResponse response = (HttpServletResponse) servletResponse;
 
         String clientIp = request.getRemoteAddr();
-        SlidingWindowCounter counter = counters.computeIfAbsent(clientIp, k -> new SlidingWindowCounter());
+        SlidingWindowCounter counter = counters.computeIfAbsent(clientIp, k -> {
+            if (counters.size() >= MAX_COUNTERS) {
+                cleanupStaleCounters();
+            }
+            return new SlidingWindowCounter();
+        });
 
         if (counter.allowRequest()) {
             filterChain.doFilter(request, response);
@@ -37,6 +56,11 @@ public class RateLimitingFilter implements Filter {
             response.setContentType("application/json");
             response.getWriter().write("{\"error\":\"Too many requests. Please try again later.\"}");
         }
+    }
+
+    private void cleanupStaleCounters() {
+        long now = System.currentTimeMillis();
+        counters.entrySet().removeIf(entry -> now - entry.getValue().windowStart > WINDOW_MS * 2);
     }
 
     static class SlidingWindowCounter {

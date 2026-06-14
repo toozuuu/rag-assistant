@@ -29,13 +29,25 @@ public class ChatService {
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
 
-    @Value("${app.base-url:http://localhost:8080}")
+    @Value("${app.base-url}")
     private String baseUrl;
 
     public ChatService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore, ObjectMapper objectMapper) {
         this.chatClient = chatClientBuilder.build();
         this.vectorStore = vectorStore;
         this.objectMapper = objectMapper;
+    }
+
+    @PostConstruct
+    public void validateBaseUrl() {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new IllegalStateException("app.base-url must be configured");
+        }
+        try {
+            new java.net.URL(baseUrl);
+        } catch (java.net.MalformedURLException e) {
+            throw new IllegalStateException("Invalid app.base-url: " + baseUrl, e);
+        }
     }
 
     public ChatResponse askQuestion(String question, String workspace, List<ChatHistoryEntry> history) {
