@@ -9,6 +9,7 @@ spring:
     exclude:
       - org.springframework.ai.autoconfigure.openai.OpenAiAutoConfiguration
       - org.springframework.ai.autoconfigure.qdrant.QdrantVectorStoreAutoConfiguration
+      - org.springframework.ai.autoconfigure.ollama.OllamaAutoConfiguration
 jwt:
   secret: test-secret-key-which-is-at-least-256-bits-long-for-hs256-algorithm
   expiration: 86400000
