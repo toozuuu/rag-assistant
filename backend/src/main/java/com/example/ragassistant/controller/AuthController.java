@@ -1,4 +1,4 @@
-package com.example.ragassistant.controller;
+﻿package com.example.ragassistant.controller;
 
 import com.example.ragassistant.dto.LoginRequest;
 import com.example.ragassistant.dto.LoginResponse;
@@ -45,5 +45,13 @@ public class AuthController {
                     .body(Map.of("error", "Invalid or expired refresh token"));
         }
         return ResponseEntity.ok(Map.of("token", token));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@RequestBody(required = false) RefreshRequest request) {
+        if (request != null && request.getRefreshToken() != null) {
+            jwtUtil.revokeRefreshToken(request.getRefreshToken());
+        }
+        return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
     }
 }

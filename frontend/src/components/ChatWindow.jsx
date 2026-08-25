@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { getApiUrl, getActiveLlmConfig } from '../api';
+import { getApiUrl, getActiveLlmConfig, authFetch } from '../api';
 import './ChatWindow.css';
 
 // Preprocessor to replace [cit:X] syntax with markdown links [[cit-X]](#cit-X)
@@ -166,9 +166,9 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
         .filter(m => m.role !== 'ai' || (!m.isRefusal && m.content))
         .slice(-20)
         .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
-      await fetch(getApiUrl('/api/conversations'), {
+      await authFetch(getApiUrl('/api/conversations'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversationId, messages: history })
       });
     } catch {
@@ -187,7 +187,6 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
     setLoading(true);
 
     try {
-      let currentToken = token;
       const history = messages
         .filter(m => m.role !== 'ai' || (!m.isRefusal && m.content))
         .slice(-10)
@@ -199,31 +198,11 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
         llmConfig: getActiveLlmConfig()
       });
 
-      let response = await fetch(getApiUrl('/api/chat/ask'), {
+      const response = await authFetch(getApiUrl('/api/chat/ask'), {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentToken}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body
       });
-
-      if (response.status === 401 || response.status === 403) {
-        if (onAuthError) {
-          const newToken = await onAuthError();
-          if (newToken) {
-            currentToken = newToken;
-            response = await fetch(getApiUrl('/api/chat/ask'), {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${currentToken}`
-              },
-              body
-            });
-          }
-        }
-      }
 
       if (response.status === 401 || response.status === 403) {
         setMessages(prev => [...prev, {

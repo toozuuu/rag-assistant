@@ -1,9 +1,10 @@
-package com.example.ragassistant.security;
+﻿package com.example.ragassistant.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -27,10 +28,21 @@ public class JwtUtil {
     @Value("${jwt.refresh-expiration:2592000000}")
     private long refreshExpiration;
 
-    private final Map<String, String> refreshTokens = new ConcurrentHashMap<>();
+    private SecretKey cachedSigningKey;
+
+    private record RefreshTokenData(String username, long expiresAt) {}
+    private final Map<String, RefreshTokenData> refreshTokens = new ConcurrentHashMap<>();
+
+    @PostConstruct
+    public void initKey() {
+        this.cachedSigningKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    }
 
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        if (cachedSigningKey == null) {
+            cachedSigningKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        }
+        return cachedSigningKey;
     }
 
     public String extractUsername(String token) {
@@ -61,21 +73,33 @@ public class JwtUtil {
     }
 
     public String generateRefreshToken(String username) {
+        evictExpiredRefreshTokens();
         String refreshToken = UUID.randomUUID().toString() + "-" + System.currentTimeMillis();
-        refreshTokens.put(refreshToken, username);
+        refreshTokens.put(refreshToken, new RefreshTokenData(username, System.currentTimeMillis() + refreshExpiration));
         return refreshToken;
     }
 
     public String refreshAccessToken(String refreshToken) {
-        String username = refreshTokens.get(refreshToken);
-        if (username == null) {
+        evictExpiredRefreshTokens();
+        RefreshTokenData data = refreshTokens.get(refreshToken);
+        if (data == null || data.expiresAt() < System.currentTimeMillis()) {
+            if (data != null) {
+                refreshTokens.remove(refreshToken);
+            }
             return null;
         }
-        return generateToken(username);
+        return generateToken(data.username());
     }
 
     public void revokeRefreshToken(String refreshToken) {
-        refreshTokens.remove(refreshToken);
+        if (refreshToken != null) {
+            refreshTokens.remove(refreshToken);
+        }
+    }
+
+    private void evictExpiredRefreshTokens() {
+        long now = System.currentTimeMillis();
+        refreshTokens.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now);
     }
 
     public boolean validateToken(String token, String username) {

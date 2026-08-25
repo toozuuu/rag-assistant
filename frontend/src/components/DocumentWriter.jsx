@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { getApiUrl, getActiveLlmConfig } from '../api';
+import { getApiUrl, getActiveLlmConfig, authFetch } from '../api';
 import './DocumentWriter.css';
 
 const DocumentWriter = ({ token, workspace, onAuthError }) => {
@@ -39,12 +39,10 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
     setReasoning('');
 
     try {
-      let currentToken = token;
-      let response = await fetch(getApiUrl('/api/writer/generate'), {
+      const response = await authFetch(getApiUrl('/api/writer/generate'), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentToken}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           prompt,
@@ -54,29 +52,12 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
       });
 
       if (response.status === 401 || response.status === 403) {
-        if (onAuthError) {
-          const newToken = await onAuthError();
-          if (newToken) {
-            currentToken = newToken;
-            response = await fetch(getApiUrl('/api/writer/generate'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${currentToken}`
-              },
-              body: JSON.stringify({ prompt, workspace: workspace || 'default' })
-            });
-          }
-        }
-      }
-
-      if (response.status === 401 || response.status === 403) {
         setDraft("# Authentication Error\nYour session has expired. Please verify your connection or try again.");
         return;
       }
 
       const data = await response.json();
-      setDraft(data.draft || '');
+      setDraft(data.draft || data.content || '');
       setReasoning(data.reasoning || '');
     } catch (error) {
       console.error("Document generation failed:", error);

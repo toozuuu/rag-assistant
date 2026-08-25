@@ -1,4 +1,4 @@
-package com.example.ragassistant.controller;
+﻿package com.example.ragassistant.controller;
 
 import com.example.ragassistant.dto.LlmTestRequest;
 import com.example.ragassistant.dto.LlmTestResponse;
@@ -21,7 +21,7 @@ public class LlmConfigController {
 
     @PostMapping("/test")
     public ResponseEntity<LlmTestResponse> testConnection(@RequestBody LlmTestRequest request) {
-        LlmTestResponse response = dynamicLlmService.testConnection(request.getConfig());
+        LlmTestResponse response = dynamicLlmService.testConnection(request.getConfig(), request.getTestPrompt());
         return ResponseEntity.ok(response);
     }
 

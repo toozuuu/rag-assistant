@@ -1,4 +1,4 @@
-package com.example.ragassistant.security;
+﻿package com.example.ragassistant.security;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
@@ -36,6 +36,26 @@ public class RateLimitingFilter implements Filter {
         cleanupExecutor.scheduleAtFixedRate(this::cleanupStaleCounters, CLEANUP_INTERVAL_MS, CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Resolves the real client IP, honouring the X-Forwarded-For header when present.
+     * The first address in X-Forwarded-For is the originating client; subsequent addresses
+     * are intermediate proxies. We take the leftmost address only.
+     */
+    private String resolveClientIp(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isBlank()) {
+            String firstIp = xForwardedFor.split(",")[0].trim();
+            if (!firstIp.isEmpty()) {
+                return firstIp;
+            }
+        }
+        String xRealIp = request.getHeader("X-Real-IP");
+        if (xRealIp != null && !xRealIp.isBlank()) {
+            return xRealIp.trim();
+        }
+        return request.getRemoteAddr();
+    }
+
     @Override
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain)
             throws IOException, ServletException {
@@ -43,7 +63,7 @@ public class RateLimitingFilter implements Filter {
         HttpServletRequest request = (HttpServletRequest) servletRequest;
         HttpServletResponse response = (HttpServletResponse) servletResponse;
 
-        String clientIp = request.getRemoteAddr();
+        String clientIp = resolveClientIp(request);
         SlidingWindowCounter counter = counters.computeIfAbsent(clientIp, k -> {
             if (counters.size() >= MAX_COUNTERS) {
                 cleanupStaleCounters();
@@ -58,6 +78,11 @@ public class RateLimitingFilter implements Filter {
             response.setContentType("application/json");
             response.getWriter().write("{\"error\":\"Too many requests. Please try again later.\"}");
         }
+    }
+
+    @Override
+    public void destroy() {
+        cleanupExecutor.shutdownNow();
     }
 
     private void cleanupStaleCounters() {

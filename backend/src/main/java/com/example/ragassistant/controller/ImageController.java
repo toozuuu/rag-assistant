@@ -1,6 +1,6 @@
-package com.example.ragassistant.controller;
+﻿package com.example.ragassistant.controller;
 
-import com.example.ragassistant.service.ImageExtractorService;
+import com.example.ragassistant.ingestion.IngestionModule;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
@@ -20,8 +20,7 @@ public class ImageController {
             @PathVariable String docId,
             @PathVariable String filename
     ) {
-        // Security: prevent path traversal and ensure it stays inside the upload directory
-        Path baseDirPath = Paths.get(ImageExtractorService.UPLOAD_DIR).toAbsolutePath().normalize();
+        Path baseDirPath = Paths.get(IngestionModule.UPLOAD_DIR).toAbsolutePath().normalize();
         Path imagePath = baseDirPath.resolve(docId).resolve(filename).toAbsolutePath().normalize();
 
         if (!imagePath.startsWith(baseDirPath)) {

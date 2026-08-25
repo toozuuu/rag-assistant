@@ -1,116 +1,84 @@
-package com.example.ragassistant.service;
+﻿package com.example.ragassistant.service;
 
 import com.example.ragassistant.dto.LlmConfig;
+import com.example.ragassistant.dto.WriterRequest;
 import com.example.ragassistant.dto.WriterResponse;
+import com.example.ragassistant.rag.RagPipeline;
+import com.example.ragassistant.rag.RagQuery;
+import com.example.ragassistant.rag.RagResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 public class WriterService {
 
-    private final DynamicLlmService dynamicLlmService;
-    private final VectorStore vectorStore;
+    private static final String WRITER_SYSTEM_PROMPT = """
+        You are an expert technical writer and document drafting assistant.
+        Your goal is to generate high quality, clear, structured documents based on the provided context.
+        
+        Respond with a valid JSON object matching this schema:
+        {
+          "title": "Document Title",
+          "content": "The full generated markdown document content...",
+          "outline": ["Section 1", "Section 2", "Section 3"]
+        }
+        """;
+
+    private final RagPipeline ragPipeline;
     private final ObjectMapper objectMapper;
 
-    public WriterService(DynamicLlmService dynamicLlmService, VectorStore vectorStore, ObjectMapper objectMapper) {
-        this.dynamicLlmService = dynamicLlmService;
-        this.vectorStore = vectorStore;
+    public WriterService(RagPipeline ragPipeline, ObjectMapper objectMapper) {
+        this.ragPipeline = ragPipeline;
         this.objectMapper = objectMapper;
     }
 
-    public WriterResponse generateDocument(String prompt, String workspace) {
-        return generateDocument(prompt, workspace, null);
-    }
+    public WriterResponse generateDocument(WriterRequest request) {
+        String queryText = (request.getPrompt() != null && !request.getPrompt().isBlank())
+                ? request.getPrompt()
+                : request.getDocType() != null ? request.getDocType() : "Technical Document";
 
-    public WriterResponse generateDocument(String prompt, String workspace, LlmConfig llmConfig) {
-        log.info("Generating grounded document draft in workspace '{}' with prompt: '{}'", workspace, prompt);
+        RagQuery query = RagQuery.builder()
+                .question(queryText)
+                .workspace(request.getWorkspace() != null ? request.getWorkspace() : "default")
+                .llmConfig(request.getLlmConfig())
+                .topK(10)
+                .threshold(0.2)
+                .customSystemPrompt(WRITER_SYSTEM_PROMPT)
+                .mode(RagQuery.OutputMode.BLOCKING)
+                .build();
 
-        String safeWorkspace = sanitizeFilterValue(workspace);
-        List<Document> similarDocuments = vectorStore.similaritySearch(
-                SearchRequest.query(prompt)
-                        .withTopK(8)
-                        .withSimilarityThreshold(0.2)
-                        .withFilterExpression("workspace == '" + safeWorkspace + "'")
-        );
+        RagResult result = ragPipeline.execute(query);
 
-        String context = similarDocuments.isEmpty()
-                ? "No context documents found in the current workspace."
-                : similarDocuments.stream()
-                        .map(doc -> "- Source File: "
-                                + doc.getMetadata().getOrDefault("filename", "Unknown Document")
-                                + "\n  Text Content:\n"
-                                + doc.getMetadata().getOrDefault("parent_text", doc.getContent()))
-                        .distinct()
-                        .collect(Collectors.joining("\n\n---\n\n"));
-
-        String systemPrompt = """
-            INSTRUCTIONS (follow exactly):
-            - You are an expert professional document author and technical writer.
-            - Your task is to draft an extensive, high-quality, beautifully formatted document based on the user's request and the CONTEXT provided below.
-            - Leverage the files in the workspace (provided via CONTEXT) to ensure the document is deeply specific, accurate, and aligned with standard policies, templates, or instructions in those documents.
-            - Present the generated document in a beautiful Markdown format with clear headings, subheadings, lists, tables, bold styling, and code blocks as appropriate.
-            - Avoid generic placeholders (e.g. "[Insert Date Here]"). Formulate a complete, ready-to-use professional document layout.
-            - You MUST respond in a strict JSON format matching the schema below. Do not include any other markdown packaging, code block ticks (```json), or text outside the JSON.
-
-            JSON SCHEMA:
-            {{
-              "reasoning": "Step-by-step reasoning (2-3 sentences) explaining which sections of the workspace documentation were utilized to compose the draft.",
-              "draft": "The complete, detailed document drafted in full Markdown format."
-            }}
-
-            WORKSPACE CONTEXT:
-            {context}
-            """;
-
-        PromptTemplate promptTemplate = new PromptTemplate(systemPrompt);
-        String systemMessage = promptTemplate.render(Map.of("context", context));
-
-        String rawResponse = dynamicLlmService.generateCompletion(llmConfig, systemMessage, prompt);
-
-        if (rawResponse == null) {
-            return new WriterResponse(
-                "# Document Generation Failed\nWe could not retrieve a valid draft from the LLM model.",
-                "The LLM response was null."
-            );
-        }
-
-        String jsonText = rawResponse.trim();
-        if (jsonText.startsWith("```")) {
-            jsonText = jsonText.replaceAll("^```[a-zA-Z]*\\s*", "");
-            jsonText = jsonText.replaceAll("\\s*```$", "");
-            jsonText = jsonText.trim();
-        }
-
+        // Try to parse as Writer structured response
+        String cleaned = RagPipeline.stripCodeBlocks(result.answer());
         try {
-            JsonNode rootNode = objectMapper.readTree(jsonText);
-
-            String reasoning = rootNode.path("reasoning").asText("Composed using workspace documentation.");
-            String draft = rootNode.path("draft").asText("");
-
-            if (draft.isEmpty()) {
-                draft = jsonText;
+            JsonNode node = objectMapper.readTree(cleaned);
+            String title = node.path("title").asText("Generated Document");
+            String content = node.path("content").asText(result.answer());
+            List<String> outline = new java.util.ArrayList<>();
+            JsonNode outlineNode = node.path("outline");
+            if (outlineNode.isArray()) {
+                outlineNode.forEach(o -> outline.add(o.asText()));
             }
 
-            return new WriterResponse(draft, reasoning);
+            return WriterResponse.builder()
+                    .title(title)
+                    .content(content)
+                    .outline(outline)
+                    .sources(result.sources())
+                    .build();
         } catch (Exception e) {
-            log.warn("Failed to parse structured JSON from document writer LLM, returning full output as draft: {}", e.getMessage());
-            return new WriterResponse(rawResponse, "Composed draft with fallback parsing.");
+            return WriterResponse.builder()
+                    .title("Generated " + (request.getDocType() != null ? request.getDocType() : "Document"))
+                    .content(result.answer())
+                    .outline(List.of())
+                    .sources(result.sources())
+                    .build();
         }
-    }
-
-    private String sanitizeFilterValue(String value) {
-        if (value == null) return "default";
-        return value.replace("'", "\\'");
     }
 }

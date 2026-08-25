@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { getApiUrl } from '../api';
+import { getApiUrl, authFetch } from '../api';
 import './RepoConnectModal.css';
 
 const RepoConnectModal = ({ token, onAuthError, isOpen, onClose, onRepoIndexed }) => {
@@ -46,30 +46,13 @@ const RepoConnectModal = ({ token, onAuthError, isOpen, onClose, onRepoIndexed }
     };
 
     try {
-      let currentToken = token;
-      let res = await fetch(getApiUrl('/api/repository/connect'), {
+      const res = await authFetch(getApiUrl('/api/repository/connect'), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentToken}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
-
-      if ((res.status === 401 || res.status === 403) && onAuthError) {
-        const refreshedToken = await onAuthError();
-        if (refreshedToken) {
-          currentToken = refreshedToken;
-          res = await fetch(getApiUrl('/api/repository/connect'), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${currentToken}`
-            },
-            body: JSON.stringify(payload)
-          });
-        }
-      }
 
       const data = await res.json();
       if (res.ok && data.status === 'SUCCESS') {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getApiUrl } from '../api';
+import { getApiUrl, authFetch } from '../api';
 import './FileUpload.css';
 
 const FileIcon = ({ name }) => {
@@ -40,20 +40,9 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
   const [dragging, setDragging] = useState(false);
   const [deleting, setDeleting] = useState(null);
 
-  const fetchIndexedDocuments = useCallback(async (currentToken) => {
+  const fetchIndexedDocuments = useCallback(async () => {
     try {
-      let res = await fetch(getApiUrl(`/api/documents?workspace=${encodeURIComponent(workspace || 'default')}`), {
-        headers: { 'Authorization': `Bearer ${currentToken || token}` }
-      });
-
-      if ((res.status === 401 || res.status === 403) && onAuthError) {
-        const newToken = await onAuthError();
-        if (newToken) {
-          res = await fetch(getApiUrl(`/api/documents?workspace=${encodeURIComponent(workspace || 'default')}`), {
-            headers: { 'Authorization': `Bearer ${newToken}` }
-          });
-        }
-      }
+      const res = await authFetch(getApiUrl(`/api/documents?workspace=${encodeURIComponent(workspace || 'default')}`));
 
       if (res.ok) {
         const docs = await res.json();
@@ -68,7 +57,7 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     } catch {
       // fallback to local storage
     }
-  }, [workspace, token, onAuthError]);
+  }, [workspace]);
 
   // ── Load persisted indexed files when workspace changes ──────────────
   useEffect(() => {
@@ -111,9 +100,8 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     if (file?.docId) {
       setDeleting(name);
       try {
-        const res = await fetch(getApiUrl(`/api/documents/${encodeURIComponent(file.docId)}?workspace=${encodeURIComponent(workspace || 'default')}`), {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` }
+        const res = await authFetch(getApiUrl(`/api/documents/${encodeURIComponent(file.docId)}?workspace=${encodeURIComponent(workspace || 'default')}`), {
+          method: 'DELETE'
         });
         if (!res.ok) {
           console.error('Failed to delete document from backend');
@@ -145,30 +133,10 @@ const FileUpload = ({ token, workspace, onAuthError }) => {
     formData.append('workspace', workspace || 'default');
 
     try {
-      let currentToken = token;
-      let res = await fetch(getApiUrl('/api/documents/upload'), {
+      const res = await authFetch(getApiUrl('/api/documents/upload'), {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${currentToken}`
-        },
         body: formData,
       });
-
-      if (res.status === 401 || res.status === 403) {
-        if (onAuthError) {
-          const newToken = await onAuthError();
-          if (newToken) {
-            currentToken = newToken;
-            res = await fetch(getApiUrl('/api/documents/upload'), {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${currentToken}`
-              },
-              body: formData,
-            });
-          }
-        }
-      }
 
       // Handle specific HTTP status codes with meaningful messages
       if (res.status === 400) {
