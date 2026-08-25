@@ -23,7 +23,7 @@ public class WriterController {
     @PostMapping("/generate")
     public ResponseEntity<WriterResponse> generate(@Valid @RequestBody WriterRequest request) {
         String workspace = request.getWorkspace() != null ? request.getWorkspace() : "default";
-        WriterResponse response = writerService.generateDocument(request.getPrompt(), workspace);
+        WriterResponse response = writerService.generateDocument(request.getPrompt(), workspace, request.getLlmConfig());
         return ResponseEntity.ok(response);
     }
 }

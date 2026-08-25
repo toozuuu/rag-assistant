@@ -9,8 +9,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
-
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
@@ -24,7 +22,7 @@ public class ChatController {
     @PostMapping("/ask")
     public ResponseEntity<ChatResponse> ask(@Valid @RequestBody ChatRequest request) {
         String workspace = request.getWorkspace() != null ? request.getWorkspace() : "default";
-        ChatResponse response = chatService.askQuestion(request.getQuestion(), workspace, request.getHistory());
+        ChatResponse response = chatService.askQuestion(request.getQuestion(), workspace, request.getHistory(), request.getLlmConfig());
         return ResponseEntity.ok(response);
     }
 
@@ -33,7 +31,7 @@ public class ChatController {
         String workspace = request.getWorkspace() != null ? request.getWorkspace() : "default";
         SseEmitter emitter = new SseEmitter(60000L);
 
-        chatService.askQuestionStream(request.getQuestion(), workspace, request.getHistory(), emitter);
+        chatService.askQuestionStream(request.getQuestion(), workspace, request.getHistory(), request.getLlmConfig(), emitter);
 
         return emitter;
     }

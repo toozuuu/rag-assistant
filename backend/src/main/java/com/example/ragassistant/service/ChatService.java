@@ -2,38 +2,38 @@ package com.example.ragassistant.service;
 
 import com.example.ragassistant.dto.ChatHistoryEntry;
 import com.example.ragassistant.dto.ChatResponse;
+import com.example.ragassistant.dto.LlmConfig;
 import com.example.ragassistant.dto.SourceReference;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
 @Slf4j
 public class ChatService {
 
-    private static final String NOT_FOUND_MESSAGE = "I could not find this information in the documentation.";
+    private static final String NOT_FOUND_MESSAGE = "I could not find this information in the indexed documentation or codebase.";
 
-    private final ChatClient chatClient;
+    private final DynamicLlmService dynamicLlmService;
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
 
     @Value("${app.base-url}")
     private String baseUrl;
 
-    public ChatService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore, ObjectMapper objectMapper) {
-        this.chatClient = chatClientBuilder.build();
+    public ChatService(DynamicLlmService dynamicLlmService, VectorStore vectorStore, ObjectMapper objectMapper) {
+        this.dynamicLlmService = dynamicLlmService;
         this.vectorStore = vectorStore;
         this.objectMapper = objectMapper;
     }
@@ -51,13 +51,17 @@ public class ChatService {
     }
 
     public ChatResponse askQuestion(String question, String workspace, List<ChatHistoryEntry> history) {
+        return askQuestion(question, workspace, history, null);
+    }
+
+    public ChatResponse askQuestion(String question, String workspace, List<ChatHistoryEntry> history, LlmConfig llmConfig) {
         // 1. Retrieve top-4 most relevant child chunks above threshold
         List<Document> similarDocuments = searchSimilarDocuments(question, workspace);
         if (similarDocuments.isEmpty()) {
             return new ChatResponse(
                 NOT_FOUND_MESSAGE,
                 List.of(), List.of(), true,
-                "Retrieval step returned zero documents exceeding the similarity threshold of 0.4.",
+                "Retrieval step returned zero documents or code files exceeding the similarity threshold of 0.35.",
                 0.0
             );
         }
@@ -67,7 +71,7 @@ public class ChatService {
         String context = buildContextString(similarDocuments, sources);
 
         // 3. Corrective RAG: Self-Correction Relevance Grader
-        boolean isRelevant = evaluateContextRelevance(question, context);
+        boolean isRelevant = evaluateContextRelevance(question, context, llmConfig);
         if (!isRelevant) {
             return new ChatResponse(
                 NOT_FOUND_MESSAGE,
@@ -78,7 +82,7 @@ public class ChatService {
         }
 
         // 4. Generate structured answer with anti-hallucination prompt
-        String rawAiResponse = callLlmWithContext(question, context, history);
+        String rawAiResponse = callLlmWithContext(question, context, history, llmConfig);
         return parseLlmResponse(rawAiResponse, sources);
     }
 
@@ -92,10 +96,14 @@ public class ChatService {
     }
 
     public void askQuestionStream(String question, String workspace, List<ChatHistoryEntry> history, SseEmitter emitter) {
+        askQuestionStream(question, workspace, history, null, emitter);
+    }
+
+    public void askQuestionStream(String question, String workspace, List<ChatHistoryEntry> history, LlmConfig llmConfig, SseEmitter emitter) {
         try {
             List<Document> similarDocuments = searchSimilarDocuments(question, workspace);
             if (similarDocuments.isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data("No relevant documents found."));
+                emitter.send(SseEmitter.event().name("error").data("No relevant documents or code files found."));
                 emitter.complete();
                 return;
             }
@@ -103,7 +111,7 @@ public class ChatService {
             List<SourceReference> sources = new ArrayList<>();
             String context = buildContextString(similarDocuments, sources);
 
-            boolean isRelevant = evaluateContextRelevance(question, context);
+            boolean isRelevant = evaluateContextRelevance(question, context, llmConfig);
             if (!isRelevant) {
                 emitter.send(SseEmitter.event().name("error").data("No relevant information found."));
                 emitter.complete();
@@ -113,10 +121,11 @@ public class ChatService {
             String historyStr = formatHistory(history);
             String systemPrompt = """
                 INSTRUCTIONS (follow exactly):
-                - You are a documentation assistant.
+                - You are an expert Software Architecture, Code & QA Requirement Assistant.
                 - You ONLY answer using the CONTEXT LIST provided below.
-                - NEVER use your own knowledge. NEVER guess.
+                - When asked by QA or developers about requirements, business logic, endpoints, validation rules, or test scenarios, analyze the codebase logic and specifications in the CONTEXT.
                 - Ground your answer completely.
+                - NEVER use ungrounded external knowledge.
 
                 CONVERSATION HISTORY:
                 %s
@@ -126,62 +135,67 @@ public class ChatService {
                 """;
 
             String systemMessage = String.format(systemPrompt, historyStr, context);
-
-            chatClient.prompt()
-                    .system(systemMessage)
-                    .user(question)
-                    .stream()
-                    .content()
-                    .doOnComplete(emitter::complete)
-                    .doOnError(emitter::completeWithError)
-                    .subscribe(chunk -> {
-                        try {
-                            emitter.send(SseEmitter.event().name("token").data(chunk));
-                        } catch (IOException e) {
-                            emitter.completeWithError(e);
-                        }
-                    });
-
+            dynamicLlmService.generateCompletionStream(llmConfig, systemMessage, question, emitter);
         } catch (Exception e) {
+            log.error("Stream generation failed: {}", e.getMessage(), e);
             try {
-                emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
-            } catch (IOException ignored) {}
+                emitter.send(SseEmitter.event().name("error").data("Stream error: " + e.getMessage()));
+            } catch (Exception ignored) {}
             emitter.completeWithError(e);
         }
     }
 
     private List<Document> searchSimilarDocuments(String question, String workspace) {
-        String safeWorkspace = sanitizeFilterValue(workspace);
+        String safeWorkspace = workspace != null ? workspace.replace("'", "\\'") : "default";
         return vectorStore.similaritySearch(
-                SearchRequest.query(question)
-                        .withTopK(4)
-                        .withSimilarityThreshold(0.4)
-                        .withFilterExpression("workspace == '" + safeWorkspace + "'")
+            SearchRequest.query(question)
+                .withTopK(4)
+                .withSimilarityThreshold(0.35)
+                .withFilterExpression("workspace == '" + safeWorkspace + "'")
         );
-    }
-
-    private String sanitizeFilterValue(String value) {
-        if (value == null) return "default";
-        return value.replace("'", "\\'");
     }
 
     private String buildContextString(List<Document> similarDocuments, List<SourceReference> sources) {
         StringBuilder contextBuilder = new StringBuilder();
-        for (int i = 0; i < similarDocuments.size(); i++) {
-            Document doc = similarDocuments.get(i);
-            String filename = String.valueOf(doc.getMetadata().getOrDefault("filename", "Unknown Document"));
-            String parentText = String.valueOf(doc.getMetadata().getOrDefault("parent_text", doc.getContent()));
-            Integer pageNumber = extractPageNumber(doc.getMetadata().get("page_number"));
+        int citIndex = 0;
 
-            contextBuilder.append("- Context [cit:").append(i).append("]:\n");
-            contextBuilder.append("  File: ").append(filename);
-            if (pageNumber != null) {
-                contextBuilder.append(" (Page ").append(pageNumber).append(")");
-            }
-            contextBuilder.append("\n");
-            contextBuilder.append("  Text: ").append(parentText).append("\n\n");
+        for (Document doc : similarDocuments) {
+            Map<String, Object> metadata = doc.getMetadata();
+            String docId = (String) metadata.getOrDefault("doc_id", "unknown");
+            String filename = (String) metadata.getOrDefault("filename", "unknown");
+            String parentText = (String) metadata.getOrDefault("parent_text", doc.getContent());
+            String chunkType = (String) metadata.getOrDefault("chunk_type", "doc");
+            String filePath = (String) metadata.getOrDefault("filePath", "");
+            String language = (String) metadata.getOrDefault("language", "");
+            String repository = (String) metadata.getOrDefault("repository", "");
+            String branch = (String) metadata.getOrDefault("branch", "");
+            Integer pageNumber = extractPageNumber(metadata.get("page_number"));
 
-            sources.add(new SourceReference(filename, null, doc.getContent(), pageNumber));
+            // Build human-readable snippet (truncated to 160 chars)
+            String snippet = parentText.length() > 160
+                    ? parentText.substring(0, 160).replace("\n", " ").trim() + "..."
+                    : parentText.replace("\n", " ").trim();
+
+            sources.add(new SourceReference(
+                    filename,
+                    chunkType,
+                    snippet,
+                    pageNumber,
+                    filePath,
+                    language,
+                    repository,
+                    branch
+            ));
+
+            String refHeader = String.format("[cit:%d] (File: %s%s%s)",
+                    citIndex,
+                    filename,
+                    filePath.isBlank() ? "" : " | Path: " + filePath,
+                    pageNumber != null ? " | Page: " + pageNumber : "");
+
+            contextBuilder.append(refHeader).append("\n")
+                          .append(parentText).append("\n\n");
+            citIndex++;
         }
         return contextBuilder.toString();
     }
@@ -199,7 +213,7 @@ public class ChatService {
         return null;
     }
 
-    private boolean evaluateContextRelevance(String question, String context) {
+    private boolean evaluateContextRelevance(String question, String context, LlmConfig llmConfig) {
         String gradingSystemPrompt = """
             You are a strict data grader. Evaluate if the CONTEXT provided below is relevant and contains any useful details to help answer the user's question: "{question}".
             Respond with EXACTLY one word: "YES" or "NO". Do not write any other words, details, or markdown formatting.
@@ -211,31 +225,27 @@ public class ChatService {
         PromptTemplate gradingTemplate = new PromptTemplate(gradingSystemPrompt);
         String gradingMessage = gradingTemplate.render(Map.of("question", question, "context", context));
         
-        String gradingResult = chatClient.prompt()
-                .system(gradingMessage)
-                .user("Is the context relevant?")
-                .call()
-                .content();
+        String gradingResult = dynamicLlmService.generateCompletion(llmConfig, gradingMessage, "Is the context relevant?");
         
         boolean isRelevant = gradingResult != null && gradingResult.trim().toUpperCase().contains("YES");
         log.info("Retrieval Grader evaluated document context relevance as: {} (Raw LLM output: {})", isRelevant, gradingResult);
         return isRelevant;
     }
 
-    private String callLlmWithContext(String question, String context, List<ChatHistoryEntry> history) {
+    private String callLlmWithContext(String question, String context, List<ChatHistoryEntry> history, LlmConfig llmConfig) {
         String historyStr = formatHistory(history);
         String systemPrompt = """
             INSTRUCTIONS (follow exactly):
-            - You are a documentation assistant.
-            - You ONLY answer using the CONTEXT LIST provided below.
-            - NEVER use your own knowledge. NEVER guess. NEVER suggest external websites or contacts.
+            - You are an expert Documentation, Codebase & QA Requirement Assistant.
+            - You answer questions regarding requirements, API contracts, validations, business logic, test cases, and implementation details using the CONTEXT LIST provided below.
+            - NEVER hallucinate or guess. Ground your answers strictly on the provided context.
             - You MUST respond in a strict JSON format matching the schema below. Do not include any other markdown packaging, code block ticks (```json), or text outside the JSON.
-            - Ground your answer completely. If you formulate a sentence based on Context [cit:X], you MUST append the citation marker `[cit:X]` at the end of that sentence or phrase. You can use multiple citations like `[cit:0][cit:1]` if needed.
+            - If you formulate a sentence based on Context [cit:X], append the citation marker `[cit:X]` at the end of that sentence or statement. You can use multiple citations like `[cit:0][cit:1]`.
             
             JSON SCHEMA:
             {{
-              "reasoning": "Step-by-step logic in 2-3 sentences explaining exactly which sections of the context contain the facts used to formulate the answer.",
-              "answer": "The clean, formatted markdown answer containing inline citation markers like [cit:0] at the end of relevant sentences (using bold, numbered lists, etc. for formatting).",
+              "reasoning": "Step-by-step logic explaining which code files or documentation sections contain the facts.",
+              "answer": "The formatted markdown answer (supporting code blocks, bullet points, Gherkin/BDD tables, test scenarios) containing inline citation markers like [cit:0].",
               "confidenceScore": 0.0 to 1.0 representing how fully the context supports the question
             }}
 
@@ -252,11 +262,7 @@ public class ChatService {
         PromptTemplate promptTemplate = new PromptTemplate(systemPrompt);
         String systemMessage = promptTemplate.render(Map.of("context", context, "history", historyStr));
 
-        String rawAiResponse = chatClient.prompt()
-                .system(systemMessage)
-                .user(question)
-                .call()
-                .content();
+        String rawAiResponse = dynamicLlmService.generateCompletion(llmConfig, systemMessage, question);
 
         if (rawAiResponse == null) {
             rawAiResponse = "{\"reasoning\":\"No response from model\",\"answer\":\"" + NOT_FOUND_MESSAGE + "\",\"confidenceScore\":0.0}";
@@ -267,24 +273,31 @@ public class ChatService {
     private ChatResponse parseLlmResponse(String rawAiResponse, List<SourceReference> sources) {
         String jsonText = rawAiResponse.trim();
         if (jsonText.startsWith("```")) {
-            jsonText = jsonText.replaceAll("^```[a-zA-Z]*\\s*", "");
-            jsonText = jsonText.replaceAll("\\s*```$", "");
-            jsonText = jsonText.trim();
+            int firstNewline = jsonText.indexOf('\n');
+            int lastBackticks = jsonText.lastIndexOf("```");
+            if (firstNewline != -1 && lastBackticks > firstNewline) {
+                jsonText = jsonText.substring(firstNewline + 1, lastBackticks).trim();
+            }
         }
 
-        String reasoning = "Evaluation of grounding files.";
         String answer = NOT_FOUND_MESSAGE;
-        double confidenceScore = 0.0;
+        String reasoning = "Direct context match.";
+        double confidenceScore = 1.0;
         boolean isRefusal = false;
 
         try {
-            com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(jsonText);
-            
-            reasoning = rootNode.path("reasoning").asText("Evaluated query context.");
-            answer = rootNode.path("answer").asText(NOT_FOUND_MESSAGE);
-            confidenceScore = rootNode.path("confidenceScore").asDouble(0.0);
-            
-            if (answer.toLowerCase().contains("could not find") || confidenceScore < 0.3) {
+            var node = objectMapper.readTree(jsonText);
+            if (node.has("answer")) {
+                answer = node.get("answer").asText();
+            }
+            if (node.has("reasoning")) {
+                reasoning = node.get("reasoning").asText();
+            }
+            if (node.has("confidenceScore")) {
+                confidenceScore = node.get("confidenceScore").asDouble();
+            }
+
+            if (answer.contains("could not find") || confidenceScore < 0.2) {
                 isRefusal = true;
             }
         } catch (Exception e) {
@@ -297,48 +310,17 @@ public class ChatService {
             }
         }
 
-        List<String> imageUrls = extractImageUrls(answer);
-        String finalAnswer = answer.replaceAll("\\[image:\\s*([^\\]]+)\\]", "").trim();
-
-        if (checkRefusal(finalAnswer)) {
-            isRefusal = true;
-        }
-
-        return new ChatResponse(
-                finalAnswer,
-                isRefusal ? List.of() : sources,
-                isRefusal ? List.of() : imageUrls,
-                isRefusal,
-                reasoning,
-                confidenceScore
-        );
+        List<String> images = extractImagesFromAnswer(answer);
+        return new ChatResponse(answer, sources, images, isRefusal, reasoning, confidenceScore);
     }
 
-    private List<String> extractImageUrls(String answer) {
-        List<String> imageUrls = new ArrayList<>();
-        java.util.regex.Pattern imagePattern = java.util.regex.Pattern.compile("\\[image:\\s*([^\\]]+)\\]");
-        java.util.regex.Matcher matcher = imagePattern.matcher(answer);
-        String cleanedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+    private List<String> extractImagesFromAnswer(String answer) {
+        List<String> images = new ArrayList<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\[image:\\s*([^\\]]+)\\]").matcher(answer);
         while (matcher.find()) {
-            String ref = matcher.group(1).trim();
-            imageUrls.add(cleanedBaseUrl + "/api/images/" + ref);
+            String imgPath = matcher.group(1).trim();
+            images.add(imgPath);
         }
-        return imageUrls.stream().distinct().toList();
-    }
-
-    private boolean checkRefusal(String response) {
-        if (response == null) return false;
-        String lower = response.toLowerCase();
-        return lower.contains("i cannot")
-                || lower.contains("i am sorry")
-                || lower.contains("i'm sorry")
-                || lower.contains("harmful actions")
-                || lower.contains("cannot assist")
-                || lower.contains("cannot provide")
-                || lower.contains("against my guidelines")
-                || lower.contains("against my programming")
-                || lower.contains("ethical guidelines")
-                || lower.contains("safety guidelines")
-                || lower.contains("how to kill");
+        return images;
     }
 }

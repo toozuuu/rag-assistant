@@ -64,7 +64,6 @@ class DocumentServiceTest {
         // Arrange
         String testText = "This is a test PDF document with sufficient content for chunking.";
         when(imageExtractorService.extractImages(any(byte[].class), eq("test.pdf"), anyString())).thenReturn(Collections.emptyList());
-        when(vectorStore.accept(anyList())).thenReturn(null);
         
         // Mock the extractText method to return our test text
         DocumentService spyService = spy(documentService);
@@ -82,7 +81,6 @@ class DocumentServiceTest {
     void testProcessAndStoreDocument_PdfWithNoText() throws IOException {
         // Arrange
         when(imageExtractorService.extractImages(any(byte[].class), eq("empty.pdf"), anyString())).thenReturn(Collections.emptyList());
-        when(vectorStore.accept(anyList())).thenReturn(null);
         
         // Mock the extractText method to return empty string (simulating image-only PDF)
         DocumentService spyService = spy(documentService);
@@ -99,7 +97,6 @@ class DocumentServiceTest {
     void testProcessAndStoreDocument_TextFile() throws IOException {
         // Arrange
         when(imageExtractorService.extractImages(any(byte[].class), eq("test.txt"), anyString())).thenReturn(Collections.emptyList());
-        when(vectorStore.accept(anyList())).thenReturn(null);
         
         // Mock the extractText method to return our test text
         DocumentService spyService = spy(documentService);

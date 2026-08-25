@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { getApiUrl } from '../api';
+import { getApiUrl, getActiveLlmConfig } from '../api';
 import './DocumentWriter.css';
 
 const DocumentWriter = ({ token, workspace, onAuthError }) => {
@@ -46,7 +46,11 @@ const DocumentWriter = ({ token, workspace, onAuthError }) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${currentToken}`
         },
-        body: JSON.stringify({ prompt, workspace: workspace || 'default' })
+        body: JSON.stringify({
+          prompt,
+          workspace: workspace || 'default',
+          llmConfig: getActiveLlmConfig()
+        })
       });
 
       if (response.status === 401 || response.status === 403) {

@@ -1,10 +1,10 @@
 package com.example.ragassistant.service;
 
+import com.example.ragassistant.dto.LlmConfig;
 import com.example.ragassistant.dto.WriterResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
@@ -19,17 +19,21 @@ import java.util.stream.Collectors;
 @Slf4j
 public class WriterService {
 
-    private final ChatClient chatClient;
+    private final DynamicLlmService dynamicLlmService;
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
 
-    public WriterService(ChatClient.Builder chatClientBuilder, VectorStore vectorStore, ObjectMapper objectMapper) {
-        this.chatClient = chatClientBuilder.build();
+    public WriterService(DynamicLlmService dynamicLlmService, VectorStore vectorStore, ObjectMapper objectMapper) {
+        this.dynamicLlmService = dynamicLlmService;
         this.vectorStore = vectorStore;
         this.objectMapper = objectMapper;
     }
 
     public WriterResponse generateDocument(String prompt, String workspace) {
+        return generateDocument(prompt, workspace, null);
+    }
+
+    public WriterResponse generateDocument(String prompt, String workspace, LlmConfig llmConfig) {
         log.info("Generating grounded document draft in workspace '{}' with prompt: '{}'", workspace, prompt);
 
         String safeWorkspace = sanitizeFilterValue(workspace);
@@ -72,11 +76,7 @@ public class WriterService {
         PromptTemplate promptTemplate = new PromptTemplate(systemPrompt);
         String systemMessage = promptTemplate.render(Map.of("context", context));
 
-        String rawResponse = chatClient.prompt()
-                .system(systemMessage)
-                .user(prompt)
-                .call()
-                .content();
+        String rawResponse = dynamicLlmService.generateCompletion(llmConfig, systemMessage, prompt);
 
         if (rawResponse == null) {
             return new WriterResponse(

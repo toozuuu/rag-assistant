@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { getApiUrl } from '../api';
+import { getApiUrl, getActiveLlmConfig } from '../api';
 import './ChatWindow.css';
 
 // Preprocessor to replace [cit:X] syntax with markdown links [[cit-X]](#cit-X)
@@ -14,6 +14,38 @@ const processCitations = (text) => {
   });
 };
 
+// Copyable Code Block component
+const CodeBlock = ({ inline, className, children, ...props }) => {
+  const [copied, setCopied] = useState(false);
+  const match = /language-(\w+)/.exec(className || '');
+  const lang = match ? match[1] : '';
+  const codeString = String(children).replace(/\n$/, '');
+
+  if (inline) {
+    return <code className="inline-code" {...props}>{children}</code>;
+  }
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeString);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="code-block-container">
+      <div className="code-block-header">
+        <span className="code-lang-label">{lang || 'code'}</span>
+        <button className="copy-code-btn" onClick={handleCopy}>
+          {copied ? '✓ Copied' : '📋 Copy'}
+        </button>
+      </div>
+      <pre className={`code-pre ${className || ''}`}>
+        <code {...props}>{children}</code>
+      </pre>
+    </div>
+  );
+};
+
 // Interactive overlay component for inline citations
 const CitationMarker = ({ index, sources }) => {
   const [hovered, setHovered] = useState(false);
@@ -22,6 +54,9 @@ const CitationMarker = ({ index, sources }) => {
   if (!source) {
     return <span className="citation-marker-fallback">[{index + 1}]</span>;
   }
+
+  const isCode = Boolean(source.filePath);
+  const displayName = source.filePath || source.document;
 
   return (
     <span 
@@ -33,14 +68,19 @@ const CitationMarker = ({ index, sources }) => {
       {hovered && (
         <span className="citation-tooltip glass animate-fade-in">
           <span className="tooltip-header">
-            <span className="tooltip-filename">{source.document}</span>
+            <span className="tooltip-filename">
+              {isCode ? `💻 ${displayName}` : `📄 ${displayName}`}
+            </span>
+            {source.language && (
+              <span className="tooltip-badge">.{source.language}</span>
+            )}
             {source.pageNumber && (
               <span className="tooltip-page">Page {source.pageNumber}</span>
             )}
           </span>
           {source.snippet && (
             <span className="tooltip-snippet">
-              "{source.snippet.length > 155 ? source.snippet.substring(0, 155) + '...' : source.snippet}"
+              "{source.snippet.length > 180 ? source.snippet.substring(0, 180) + '...' : source.snippet}"
             </span>
           )}
         </span>
@@ -81,6 +121,14 @@ const ThoughtProcess = ({ reasoning, confidenceScore }) => {
   );
 };
 
+const QA_PROMPTS = [
+  { label: '🧪 Generate BDD Test Cases', prompt: 'Generate comprehensive Gherkin/BDD test scenarios (Given-When-Then) covering positive, negative, and edge cases based on the requirements and codebase logic.' },
+  { label: '📋 Extract Validation Rules', prompt: 'List all input validation constraints, business rules, and error handling conditions implemented in this feature/codebase.' },
+  { label: '🔌 API Contracts & Payloads', prompt: 'List all REST API endpoints, HTTP methods, expected request/response payloads, and HTTP status codes.' },
+  { label: '🛡️ Security & Boundary Audit', prompt: 'Audit boundary conditions, authentication checks, SQL/input sanitization, and unhandled exception scenarios for QA testing.' },
+  { label: '🧩 Unit / Mock Test Suite', prompt: 'Generate unit test cases with Mockito/JUnit 5 (or Jest/PyTest) covering branch conditions and error scenarios.' },
+];
+
 const ChatWindow = ({ token, workspace, onAuthError }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -88,14 +136,11 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
   const [conversationId] = useState(null);
   const messagesEndRef = useRef(null);
 
-  // ── Reset conversation thread whenever workspace switches ───────────
   useEffect(() => {
-    // Intentional: Reset messages when workspace changes
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([
       {
         role: 'ai',
-        content: `Welcome to the Knowledge Portal! I am grounded in your **${workspace || 'default'}** workspace document repository. Ingest files to the left and ask me any questions.`
+        content: `Welcome to the **Knowledge & Code QA Assistant**! I am grounded in your **${workspace || 'default'}** workspace repository.\n\nAsk me any questions regarding requirements, code business logic, test scenarios, or API contracts.`
       }
     ]);
   }, [workspace]);
@@ -124,10 +169,11 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const handleSend = async (customPrompt) => {
+    const textToSend = typeof customPrompt === 'string' ? customPrompt : input;
+    if (!textToSend.trim()) return;
 
-    const userMessage = { role: 'user', content: input.trim() };
+    const userMessage = { role: 'user', content: textToSend.trim() };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setInput('');
@@ -139,18 +185,12 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
         .filter(m => m.role !== 'ai' || (!m.isRefusal && m.content))
         .slice(-10)
         .map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
-      const body = JSON.stringify({ question: userMessage.content, workspace: workspace || 'default', history });
-
-      // Try SSE streaming first
-      if (window.EventSource) {
-        try {
-          const eventSource = new EventSource(getApiUrl('/api/chat/ask/stream'));
-          // SSE with POST is complex; fall back to regular fetch
-          eventSource.close();
-        } catch {
-          // Ignore SSE connection errors
-        }
-      }
+      const body = JSON.stringify({
+        question: userMessage.content,
+        workspace: workspace || 'default',
+        history,
+        llmConfig: getActiveLlmConfig()
+      });
 
       let response = await fetch(getApiUrl('/api/chat/ask'), {
         method: 'POST',
@@ -212,6 +252,24 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
 
   return (
     <div className="chat-window glass">
+      {/* QA Quick Actions Header */}
+      <div className="qa-quick-actions">
+        <span className="qa-actions-title">⚡ QA Workflows:</span>
+        <div className="qa-chips-scroll">
+          {QA_PROMPTS.map((qa, i) => (
+            <button
+              key={i}
+              className="qa-chip-btn glass"
+              onClick={() => handleSend(qa.prompt)}
+              disabled={loading}
+              title={qa.prompt}
+            >
+              {qa.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="messages-container">
         <AnimatePresence initial={false}>
           {messages.map((msg, idx) => (
@@ -231,6 +289,7 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
                     <div className="markdown-body">
                       <ReactMarkdown
                         components={{
+                          code: CodeBlock,
                           a: ({ href, children }) => {
                             if (href && href.startsWith('#cit-')) {
                               const idx = parseInt(href.replace('#cit-', ''), 10);
@@ -249,11 +308,19 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
                 )}
                 {msg.sources && msg.sources.length > 0 && (
                   <div className="sources-container">
-                    <strong>Sources</strong>
+                    <strong>Grounding Sources & Code Files</strong>
                     <ul>
                       {msg.sources.map((src, i) => (
                         <li key={i}>
-                          <span className="source-doc">{src.document}</span>
+                          <span className="source-doc">
+                            {src.filePath ? `💻 ${src.filePath}` : `📄 ${src.document}`}
+                          </span>
+                          {src.language && (
+                            <span className="source-section"> [{src.language}]</span>
+                          )}
+                          {src.pageNumber && (
+                            <span className="source-section"> (Page {src.pageNumber})</span>
+                          )}
                           {src.section && src.section !== 'Snippet' && (
                             <span className="source-section"> — {src.section}</span>
                           )}
@@ -309,9 +376,9 @@ const ChatWindow = ({ token, workspace, onAuthError }) => {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Ask a question about your documents..."
+          placeholder="Ask a question about requirements, code logic, or test scenarios..."
         />
-        <button onClick={handleSend} disabled={loading || !input.trim()}>
+        <button onClick={() => handleSend()} disabled={loading || !input.trim()}>
           Send
         </button>
       </div>

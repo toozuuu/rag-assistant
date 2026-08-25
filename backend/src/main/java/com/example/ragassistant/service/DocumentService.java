@@ -111,7 +111,7 @@ public class DocumentService {
         }
     }
 
-    private String getExtension(String filename) {
+    String getExtension(String filename) {
         int dotIdx = filename.lastIndexOf('.');
         if (dotIdx < 0) return "";
         return filename.substring(dotIdx + 1).toLowerCase();
@@ -133,7 +133,7 @@ public class DocumentService {
         }
     }
 
-    private String extractText(byte[] fileBytes, String originalFilename, String docId, String lowerFilename) throws IOException {
+    String extractText(byte[] fileBytes, String originalFilename, String docId, String lowerFilename) throws IOException {
         if (lowerFilename.endsWith(".docx")) {
             return extractDocxWithImageTags(fileBytes, docId);
         }
@@ -344,7 +344,7 @@ public class DocumentService {
         cleanupExtractedImages(docId);
     }
 
-    private String generateDocId(String filename) {
+    String generateDocId(String filename) {
         if (filename == null) return "unknown";
         // Remove extension, lowercase, replace non-alphanumeric chars with underscore
         String base = filename.contains(".")

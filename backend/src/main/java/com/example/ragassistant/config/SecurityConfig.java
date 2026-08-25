@@ -35,11 +35,6 @@ public class SecurityConfig {
     }
 
     @Bean
-    public RateLimitingFilter rateLimitingFilter() {
-        return new RateLimitingFilter();
-    }
-
-    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
@@ -51,7 +46,9 @@ public class SecurityConfig {
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/api/chat/**").authenticated()
                 .requestMatchers("/api/documents/**").authenticated()
+                .requestMatchers("/api/repository/**").authenticated()
                 .requestMatchers("/api/writer/**").authenticated()
+                .requestMatchers("/api/llm/**").authenticated()
                 .anyRequest().authenticated()
             )
             .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

@@ -12,5 +12,9 @@ public class SourceReference {
     private String section;
     private String snippet;
     private Integer pageNumber;
+    private String filePath;
+    private String language;
+    private String repository;
+    private String branch;
 }
 

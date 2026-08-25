@@ -12,4 +12,5 @@ public class WriterRequest {
     @NotBlank(message = "Prompt must not be blank")
     private String prompt;
     private String workspace;
+    private LlmConfig llmConfig;
 }
