@@ -130,20 +130,27 @@ const QA_PROMPTS = [
 ];
 
 const ChatWindow = ({ token, workspace, onAuthError }) => {
-  const [messages, setMessages] = useState([]);
+  const [prevWorkspace, setPrevWorkspace] = useState(workspace);
+  const [messages, setMessages] = useState(() => [
+    {
+      role: 'ai',
+      content: `Welcome to the **Knowledge & Code QA Assistant**! I am grounded in your **${workspace || 'default'}** workspace repository.\n\nAsk me any questions regarding requirements, code business logic, test scenarios, or API contracts.`
+    }
+  ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [conversationId] = useState(null);
   const messagesEndRef = useRef(null);
 
-  useEffect(() => {
+  if (workspace !== prevWorkspace) {
+    setPrevWorkspace(workspace);
     setMessages([
       {
         role: 'ai',
         content: `Welcome to the **Knowledge & Code QA Assistant**! I am grounded in your **${workspace || 'default'}** workspace repository.\n\nAsk me any questions regarding requirements, code business logic, test scenarios, or API contracts.`
       }
     ]);
-  }, [workspace]);
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

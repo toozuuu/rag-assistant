@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import ChatWindow from './components/ChatWindow';
 import FileUpload from './components/FileUpload';
 import DocumentWriter from './components/DocumentWriter';
@@ -44,7 +44,7 @@ function App() {
 
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
 
-  const fetchTokenSilently = async () => {
+  const fetchTokenSilently = useCallback(async () => {
     try {
       const silentUser = import.meta.env.VITE_SILENT_AUTH_USER || 'local-user';
       const silentPass = import.meta.env.VITE_SILENT_AUTH_PASS || 'local123';
@@ -66,10 +66,37 @@ function App() {
       console.error("Silent background authentication failed:", err);
     }
     return null;
-  };
+  }, []);
 
   useEffect(() => {
-    fetchTokenSilently();
+    let ignore = false;
+    const login = async () => {
+      try {
+        const silentUser = import.meta.env.VITE_SILENT_AUTH_USER || 'local-user';
+        const silentPass = import.meta.env.VITE_SILENT_AUTH_PASS || 'local123';
+        const response = await fetch(getApiUrl('/api/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: silentUser, password: silentPass })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('refreshToken', data.refreshToken);
+          localStorage.setItem('username', data.username);
+          if (!ignore) {
+            setToken(data.token);
+          }
+        }
+      } catch (err) {
+        console.error("Silent background authentication failed:", err);
+      }
+    };
+    login();
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {

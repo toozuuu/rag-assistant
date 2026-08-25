@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { getActiveLlmConfig, saveActiveLlmConfig, testLlmConnection, getLlmPresets } from '../api';
 import './LlmSettingsModal.css';
 
@@ -61,38 +61,26 @@ const DEFAULT_PROVIDERS = [
 
 export default function LlmSettingsModal({ isOpen, onClose, token, onConfigSaved }) {
   const [providers, setProviders] = useState(DEFAULT_PROVIDERS);
-  const [selectedProvider, setSelectedProvider] = useState('OPENAI');
-  const [model, setModel] = useState('gpt-4o-mini');
-  const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
-  const [temperature, setTemperature] = useState(0.2);
+  const activeConfig = getActiveLlmConfig();
+  const [selectedProvider, setSelectedProvider] = useState(() => activeConfig?.provider || 'OPENAI');
+  const [model, setModel] = useState(() => activeConfig?.model || 'gpt-4o-mini');
+  const [apiKey, setApiKey] = useState(() => activeConfig?.apiKey || '');
+  const [baseUrl, setBaseUrl] = useState(() => activeConfig?.baseUrl || 'https://api.openai.com/v1');
+  const [temperature, setTemperature] = useState(() => (activeConfig?.temperature !== undefined ? activeConfig.temperature : 0.2));
   const [showKey, setShowKey] = useState(false);
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
   useEffect(() => {
-    if (isOpen) {
-      const active = getActiveLlmConfig();
-      if (active) {
-        setSelectedProvider(active.provider || 'OPENAI');
-        setModel(active.model || 'gpt-4o-mini');
-        setApiKey(active.apiKey || '');
-        setBaseUrl(active.baseUrl || 'https://api.openai.com/v1');
-        setTemperature(active.temperature !== undefined ? active.temperature : 0.2);
-      }
-      setTestResult(null);
-
-      // Fetch presets from backend if available
-      if (token) {
-        getLlmPresets(token)
-          .then(data => {
-            if (data?.providers?.length) {
-              setProviders(data.providers);
-            }
-          })
-          .catch(() => {});
-      }
+    if (isOpen && token) {
+      getLlmPresets(token)
+        .then(data => {
+          if (data?.providers?.length) {
+            setProviders(data.providers);
+          }
+        })
+        .catch(() => {});
     }
   }, [isOpen, token]);
 

@@ -22,12 +22,12 @@ public class UserService {
     public void init() {
         String defaultPassword = System.getenv("DEFAULT_USER_PASSWORD");
         if (defaultPassword == null || defaultPassword.isBlank()) {
-            defaultPassword = "admin";
+            defaultPassword = "admin123";
         }
         users.put("admin", new User("admin", passwordEncoder.encode(defaultPassword), "ADMIN"));
         String localPassword = System.getenv("LOCAL_USER_PASSWORD");
         if (localPassword == null || localPassword.isBlank()) {
-            localPassword = "password";
+            localPassword = "local123";
         }
         users.put("local-user", new User("local-user", passwordEncoder.encode(localPassword), "USER"));
     }

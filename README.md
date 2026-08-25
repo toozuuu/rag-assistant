@@ -1,12 +1,12 @@
-# AI-Powered RAG Assistant with Screenshot Integration
+# AI-Powered RAG Assistant with Multimodal & Codebase Intelligence
 
-A highly secure, offline-first, and **multimodal-ready RAG** (Retrieval-Augmented Generation) assistant. Engineered with **Spring Boot 3 (Spring AI)**, **React 18 (Vite)**, and a **Qdrant Vector Database**, it runs entirely locally using **Ollama**. The application stands out by extracting both plain text and embedded illustrations, screenshots, and diagrams from documents, letting the AI ground its responses with high fidelity and display visual evidence alongside answers.
+A high-performance, offline-first, and **multimodal-ready RAG** (Retrieval-Augmented Generation) assistant. Engineered with **Spring Boot 3 (Spring AI)**, **React 18 (Vite)**, and a **Qdrant Vector Database**, it runs locally using **Ollama** or connects dynamically to leading AI providers (**Anthropic Claude**, **OpenAI**, **OpenRouter**, **Groq Cloud**, or custom endpoints). The assistant extracts text and embedded illustrations/diagrams from documents, clones and ingests **Git repositories** (GitHub, Bitbucket, GitLab), and grounds AI responses with transparent citations and visual evidence.
 
 ---
 
 ## System Architecture
 
-This system is built as a three-tier local architecture. It processes, embeds, indexes, and queries documents completely within your machine's perimeter.
+The application runs as a modern, decoupled three-tier architecture that processes, embeds, indexes, and queries documents and codebases securely within your chosen perimeter.
 
 ```mermaid
 graph TD
@@ -18,46 +18,52 @@ graph TD
     classDef ollama fill:#1f2335,stroke:#f7768e,stroke-width:2px,color:#f7768e;
     classDef cloud fill:#1f2335,stroke:#bb9af7,stroke-width:2px,color:#bb9af7;
 
-    subgraph Client["Client Tier (React & Vite)"]
+    subgraph Client["Client Tier (React 18 & Vite)"]
         UI["React Web App (Glassmorphism Layout)"]:::frontend
+        LLMModal["Dynamic LLM Settings Modal"]:::frontend
+        RepoModal["Git Repo Connect Modal"]:::frontend
     end
 
     subgraph Server["Application Tier (Spring Boot 3)"]
-        SecurityFilter["Spring Security & JWT Filter"]:::backend
-        Controller["Upload & Chat Controllers"]:::backend
-        Extractor["Document Processing Suite <br/>(Apache Tika + PDFBox / POI)"]:::backend
+        SecurityFilter["Spring Security, Rate Limiting & JWT Filter"]:::backend
+        Controllers["REST Controllers (Chat, Upload, Writer, Repo, LLM)"]:::backend
+        GitIngest["Git Ingestion Service (Eclipse JGit)"]:::backend
+        Extractor["Document Processing Suite (Tika + PDFBox / POI)"]:::backend
+        DynamicLLM["Dynamic Multi-Provider LLM Engine"]:::backend
         AIService["Spring AI Integration Layer"]:::backend
         ImgStore["Local Image Upload Store"]:::backend
     end
 
     subgraph DataInf["Data & Inference Tier"]
         VectorDB[("Qdrant Vector Database")]:::database
-        LocalInf["Local Inference <br/>(Ollama: phi3:mini / nomic-embed)"]:::ollama
-        CloudInf["Cloud/Hybrid Inference <br/>(OpenRouter / OpenAI Cloud APIs)"]:::cloud
+        LocalInf["Local Inference (Ollama: phi3 / nomic-embed)"]:::ollama
+        CloudInf["Cloud Inference (Claude / OpenAI / OpenRouter / Groq)"]:::cloud
     end
 
-    %% Ingestion Flow
-    UI -->|1. Drag-and-Drop Documents| SecurityFilter
-    SecurityFilter -->|2. Authorize Request| Controller
-    Controller -->|3. Ingest stream| Extractor
-    Controller -->|4a. Extract plain text chunks| AIService
-    Extractor -->|4b. Carve embedded screenshots/images| ImgStore
-    AIService -->|5. Generate Vector Embeddings| LocalInf
-    AIService -->|5. Generate Vector Embeddings| CloudInf
-    AIService -->|6. Index text + payload metadata| VectorDB
-    ImgStore -.->|Link paths in payload| VectorDB
+    %% Ingestion Flows
+    UI -->|1a. Upload Docs| SecurityFilter
+    RepoModal -->|1b. Connect Git URL| SecurityFilter
+    SecurityFilter --> Controllers
+    Controllers -->|Ingest Docs| Extractor
+    Controllers -->|Clone & Parse Repo| GitIngest
+    Extractor -->|Carve Screenshots| ImgStore
+    Extractor -->|Chunks| AIService
+    GitIngest -->|Code Chunks + Metadata| AIService
+    AIService -->|Generate Embeddings| LocalInf
+    AIService -->|Store Vectors + Metadata| VectorDB
+    ImgStore -.->|Link Image URLs| VectorDB
 
-    %% RAG Query Flow
-    UI -->|7. Ask Natural Language Query| SecurityFilter
-    SecurityFilter -->|8. Authorize Request| Controller
-    Controller -->|9. Forward prompt| AIService
-    AIService -->|10. Fetch relevant document chunks| VectorDB
-    VectorDB -->|11. Returns top matches & image paths| AIService
-    AIService -->|12. Feed query + context to LLM| LocalInf
-    AIService -->|12. Feed query + context to LLM| CloudInf
-    LocalInf -->|13. Generate grounded answer| AIService
-    CloudInf -->|13. Generate grounded answer| AIService
-    AIService -->|14. Return structured JSON answer with sources and images| UI
+    %% Query Flows
+    UI -->|2. Natural Language / QA Query| SecurityFilter
+    SecurityFilter --> Controllers
+    Controllers --> AIService
+    AIService -->|Semantic Search| VectorDB
+    VectorDB -->|Relevant Context & Code Snippets| AIService
+    AIService -->|Grounding Context + Query| DynamicLLM
+    LLMModal -.->|Active LLM Config| DynamicLLM
+    DynamicLLM -->|Local LLM| LocalInf
+    DynamicLLM -->|Cloud LLM| CloudInf
+    DynamicLLM -->|Grounded Structured JSON Answer| UI
 ```
 
 ---
@@ -68,33 +74,38 @@ Every element in this architecture is selected to deliver maximum privacy, light
 
 | Technology | Role | Why We Selected It |
 | :--- | :--- | :--- |
-| **Spring Boot 3 & Spring AI** | Backend Framework | Spring Boot 3 brings unmatched type-safety, rapid dependency injection, and native compilation capabilities to enterprise Java. **Spring AI** abstracts vector store operations, prompt engineering, and LLM integrations cleanly, allowing us to swap components or models with zero changes to core business logic. |
-| **React 18 & Vite** | Frontend Interface | Vite delivers instantaneous Hot Module Replacement (HMR) and highly optimized production builds. React 18 allows us to create a premium, responsive glassmorphism UI with smooth asynchronous states during heavy document uploads and real-time streaming chat rendering. |
-| **Qdrant Vector Database** | Vector Indexing | Written in Rust, Qdrant is an ultra-fast vector database engineered for production. It allows us to perform high-speed cosine similarity searches, and seamlessly supports complex payload filtering (allowing us to bind document metadata, sections, and extracted screenshot paths directly to the text vectors). |
-| **Ollama (`phi3:mini` & `nomic-embed-text`)** | Local Inference | Ollama runs AI models locally on your CPU/GPU. **`nomic-embed-text`** provides high-quality 8192 token-context embeddings, and **`phi3:mini`** is an exceptionally powerful, lightweight 3.8B parameter instruct model. This ensures **100% data privacy** and **zero API costs**. |
-| **Apache Tika & PDFBox / POI** | Content Extraction Suite | **Apache Tika** handles multi-format parsing (PDF, DOCX, TXT, HTML) under a unified interface. **Apache PDFBox** and **Apache POI** carve out embedded screenshots, illustrations, and figures directly from the binary layouts of PDFs and Word documents, enabling our multimodal-like pipeline. |
+| **Spring Boot 3 & Spring AI** | Backend Framework | Spring Boot 3 brings unmatched type-safety, rapid dependency injection, and native compilation capabilities to enterprise Java. **Spring AI** abstracts vector store operations, prompt engineering, and LLM integrations cleanly. |
+| **React 18 & Vite** | Frontend Interface | Vite delivers instantaneous Hot Module Replacement (HMR) and optimized production builds. React 18 provides a responsive glassmorphism UI with smooth animations via Framer Motion. |
+| **Qdrant Vector Database** | Vector Indexing | Written in Rust, Qdrant is an ultra-fast vector database engineered for production. It supports high-speed cosine similarity searches and flexible payload filtering by workspace and document type. |
+| **Dynamic Multi-Provider LLM Engine** | Flexible AI Routing | Supports local privacy with **Ollama** (`phi3:mini`, `llama3.1`, `qwen2.5-coder`, `deepseek-r1`) as well as cloud providers (**Anthropic Claude 3.5**, **OpenAI GPT-4o**, **Groq Cloud**, **OpenRouter**, or custom OpenAI-compatible proxies). |
+| **Eclipse JGit** | Git Repository Ingestion | Native Java Git library to clone, branch-inspect, and ingest source repositories from GitHub, GitLab, Bitbucket, and private Git servers directly into vector pools. |
+| **Apache Tika & PDFBox / POI** | Content Extraction Suite | **Apache Tika** handles multi-format parsing (PDF, DOCX, TXT, HTML). **Apache PDFBox** and **Apache POI** carve embedded screenshots, illustrations, and figures directly from binary layouts. |
 
 ---
 
 ## Key Features
 
-* **Grounded Inline Citations (Next-Gen Transparency)**: Replaces "black-box" responses. AI answers are annotated with inline citation markers like `[1]` matching dotted underlines. Hovering displays a glassmorphic tooltip containing the exact document source, page number, and original grounding context snippet.
-* **Generative Document Writer & Exporter**: Features a dedicated, in-context technical drafting editor. Offers quick-pick templates (SLA Agreement, Tech Spec, Project Roadmap, Privacy Policy) and outputs beautifully styled drafts. Exporters run 100% offline via client-side Blob downloads and custom serif Print-to-PDF framers.
-* **High-Fidelity Motion Animations (`motion.dev`)**: Fluid, physics-based transitions driven by Framer Motion. Features glide-sliding active mode pills with spring physics, enter/exit sliding list elements inside the files hub, staggered mounting chat bubbles, and rotating smooth grounding accordion logs.
-* **Perfect Viewport Height Lock & Layout Integrity**: Restricts workspace height dynamically to ensure a zero-scrollbar desktop-grade experience. Features stacked two-row file cards to eliminate text clipping or metadata badge overlaps, and isolates scrolling strictly to the ingested file lists.
-* **Token-Refresh Auto-Retry Resiliency**: An automatic interceptor that catches any `401 Unauthorized` or `403 Forbidden` API responses, silently fetches a fresh signed JWT session from the backend, and transparently retries the failed API call. Also features proactive token validation on mount to guarantee a zero-interruption browser refresh experience.
-* **Isolated Multi-Workspaces (Qdrant Vector Pools)**: Segregates documents securely. Integrates Spring AI's `.withFilterExpression("workspace == ...")` payload queries in Qdrant, enabling isolated workspace swaps with instant context transitions.
-* **Visual RAG Pipeline**: Ingests PDFs and DOCXs, automatically carves out embedded illustrations and screenshots, and showcases them in a lightbox gallery inside AI answers.
-* **Self-Correction Relevance Grader (Corrective RAG)**: Features a strict anti-hallucination guard that runs a rapid corrective grading step, gracefully refusing to answer if matching ground-truth is missing.
-* **Mobile-First Responsive UX**: Employs a tailored, modern Outfit + Inter design system. Adapts cleanly across screens: full rows on Web, sliding drawer workspaces on Tablets, and touch bottom navigation bars on Mobile.
-* **Search Engine Optimized (SEO)**: Built with search-crawling directives, robot indexes, structured title tags, semantic markup, and descriptive meta keywords.
+* **Dynamic Multi-Provider AI Engine**: Switch between **OpenAI**, **Anthropic Claude**, **Ollama (Local)**, **OpenRouter**, **Groq Cloud**, or custom OpenAI-compatible proxies on the fly with per-provider model presets, temperature tuning, and a live connection latency tester.
+* **Git Codebase Ingestion (GitHub, GitLab, Bitbucket)**: Connect public and private Git repositories with token/app password authentication. The engine parses source code files, attaches language and file path metadata, and chunks code for syntax-aware technical Q&A.
+* **QA & Engineering Quick Workflows**: One-click prompt accelerators in the QA Chat Assistant:
+  * 🧪 *Generate BDD Test Cases* (Gherkin Given-When-Then positive/negative/edge cases)
+  * 📋 *Extract Validation Rules* (Input constraints, error codes, and business validations)
+  * 🔌 *API Contracts & Payloads* (REST endpoints, HTTP verbs, and request/response schemas)
+  * 🛡️ *Security & Boundary Audit* (Authentication boundaries, sanitization, and edge conditions)
+  * 🧩 *Unit / Mock Test Suite* (JUnit 5 / Mockito / Jest scaffolding)
+* **Grounded Inline Citations**: AI answers include interactive citation badges (e.g. `[1]`, `[2]`). Hovering displays a glassmorphic tooltip with file names, file paths, programming languages, page numbers, and exact grounded context snippets.
+* **Visual RAG Pipeline**: Ingests PDFs and DOCX files, automatically carves out embedded illustrations, charts, and screenshots, and displays visual evidence directly within AI responses with click-to-enlarge galleries.
+* **Generative Document Writer & Exporter**: In-context drafting assistant with presets for SLA Agreements, Technical Specs, Project Roadmaps, and Privacy Policies, complete with offline markdown and styled Print-to-PDF export.
+* **Self-Correction Relevance Grader (Corrective RAG)**: Anti-hallucination guard that runs a fast relevance grading pass, refusing to guess if retrieved context is insufficient.
+* **Isolated Multi-Workspaces (Qdrant Vector Pools)**: Segregates documents and repositories into distinct workspace pools using Qdrant payload filters.
+* **Resilient Authentication & Rate Limiting**: Zero-trust architecture with JWT authentication, silent auto-refresh retry interceptors, sliding-window rate limiting, and cross-platform path traversal protection.
 
 ---
 
 ## Setup & Execution
 
-### 1. Download Local AI Models
-Open a terminal on your host machine and run the following commands to pull the necessary models via Ollama:
+### 1. Download Local AI Models (Optional for Local Ollama)
+If using local inference with Ollama, run:
 ```bash
 # Pull the instruction-tuned chat model
 ollama pull phi3:mini
@@ -103,26 +114,41 @@ ollama pull phi3:mini
 ollama pull nomic-embed-text
 ```
 
-### 2. Launch the Application Stack
-From the project root directory, run Docker Compose to build and spin up the frontend, backend, and Qdrant container:
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env` and configure credentials:
+```bash
+cp .env.example .env
+```
+
+### 3. Launch the Application Stack
+Run Docker Compose from the repository root:
 ```bash
 docker-compose up --build
 ```
 
-### 3. Access Services
+### 4. Access Services
 * **Web App UI**: `http://localhost:5173/` (or port 80 if running production Nginx)
 * **Backend API**: `http://localhost:8080/`
+* **Swagger API Docs**: `http://localhost:8080/swagger-ui/index.html`
 * **Qdrant DB Console**: `http://localhost:6333/dashboard`
 
 ---
 
-## Security & Authentication Architecture
+## API Endpoints
 
-This project is built with a production-ready **Zero-Trust Security Design**:
-* **JSON Web Tokens (JWT)**: Secure endpoint boundaries are enforced for chat (`/api/chat/**`), ingestion (`/api/documents/**`), and writer (`/api/writer/**`).
-* **Sleek Client Auth Layer**: Establishes silent background session validation when the app mounts, saving JWTs in `localStorage` and injecting standard `Authorization: Bearer <token>` headers into every call.
-* **Cross-Platform Path Traversal Protection**: Implements robust directory anchoring and path normalization checks in Spring Boot controllers to ensure malicious players cannot retrieve system-level files using relative backslash attacks.
-* **Production Reverse Proxying**: Routes React assets and API endpoints seamlessly through Nginx, bypassing raw browser CORS locks on public environments.
+| Endpoint | Method | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `/api/auth/login` | `POST` | Authenticate user and receive access + refresh JWTs | No |
+| `/api/auth/refresh` | `POST` | Refresh expired access token using refresh token | No |
+| `/api/chat/ask` | `POST` | Ask a grounded question with optional history & dynamic LLM config | Yes |
+| `/api/chat/stream` | `POST` | Stream chat completions via Server-Sent Events (SSE) | Yes |
+| `/api/documents/upload` | `POST` | Upload and vectorize PDF, DOCX, or TXT documents | Yes |
+| `/api/repository/connect` | `POST` | Clone, vectorize, and index a Git repository | Yes |
+| `/api/repository/providers` | `GET` | List supported Git repository providers | Yes |
+| `/api/llm/test` | `POST` | Test connection and measure latency for an LLM config | Yes |
+| `/api/llm/presets` | `GET` | Retrieve default provider presets and recommended models | Yes |
+| `/api/writer/generate` | `POST` | Generate grounded document drafts from vector store context | Yes |
+| `/api/images/{filename}` | `GET` | Serve carved screenshots and document illustrations | No |
 
 ---
 
@@ -131,15 +157,17 @@ This project is built with a production-ready **Zero-Trust Security Design**:
 ```text
 rag-assistant/
 ├── backend/            # Spring Boot 3 Java Service
-│   ├── src/            # Parsing, chunking, security, and Spring AI logic
-│   ├── pom.xml         # Maven dependencies (Optimized: No H2 dependency)
-│   └── .env.example    # Backend environment template
+│   ├── src/            # Document parsing, Git ingestion, Spring AI & dynamic LLM services
+│   ├── pom.xml         # Maven dependencies (Spring AI, JGit, Tika, PDFBox, JJWT)
+│   └── Dockerfile      # Backend container build definition
 ├── frontend/           # React 18 + Vite Web Application
-│   ├── src/            # Login, ChatWindow, and FileHub components
+│   ├── src/            # ChatWindow, DocumentWriter, FileUpload, Repo & LLM Modals
 │   ├── nginx.conf      # SPA routing & API reverse proxy configuration
-│   └── package.json    # Node scripts and dependencies
-├── uploads/            # Local carved image volumes (gitignored)
-├── qdrant_data/        # Persistent database storage (gitignored)
-├── .env.example        # Root environment variable templates
-└── docker-compose.yml  # Docker multi-container orchestrator
+│   ├── Dockerfile      # Frontend production Nginx build definition
+│   └── package.json    # Node dependencies and scripts
+├── uploads/            # Local carved image storage (volume-mounted)
+├── qdrant_data/        # Persistent vector database storage
+├── .github/workflows/  # GitHub Actions CI pipeline (backend verify + frontend lint/build)
+├── .env.example        # Environment variable templates
+└── docker-compose.yml  # Multi-container service orchestrator
 ```
